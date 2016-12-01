@@ -12,7 +12,7 @@ var5 := fun2(1, var1)
 // some functions
 fun1 := (a:int, b:float, c:int) -> int {/*this is a function body*/ };
 fun2 := (a:int, b:int) -> int {/*this is a function body*/};
-fun3 := () -> void {};
+fun3 := () {};
 
 
 // some types

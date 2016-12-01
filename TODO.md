@@ -1,1 +1,1 @@
-* Check if parameter types on calling site matches prototype (line 635)
+* save arguments in function declaration (line 350)
