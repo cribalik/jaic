@@ -1,7 +1,9 @@
 // TODO: alignment!!
+#include "utils.c"
 #include <stddef.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 typedef char byte;
 #ifndef ARENA_BLOCK_SIZE
 #define ARENA_BLOCK_SIZE 32*1024*1024
@@ -17,7 +19,7 @@ typedef struct SArenaBlock {
 typedef ArenaBlock* MemArena;
 
 void arenaInit(MemArena* arena) {
-  *arena = (ArenaBlock*) malloc(sizeof(ArenaBlock));
+  *arena = calloc(1, sizeof(ArenaBlock));
   (*arena)->size = 0;
   (*arena)->prev = 0;
 }
@@ -26,13 +28,14 @@ static void* arenaPush(MemArena* arena, int size) {
   assert(size <= ARENA_BLOCK_SIZE);
   if ((*arena)->size + size > ARENA_BLOCK_SIZE) {
     // guess we get some internal fragmentation by doing this but oh well
-    ArenaBlock* new_block = (ArenaBlock*) malloc(sizeof(ArenaBlock));
+    ArenaBlock* new_block = malloc(sizeof(ArenaBlock));
     (*arena)->next = new_block;
     new_block->prev = *arena;
     *arena = new_block;
     (*arena)->size = 0;
   }
   byte* result = (*arena)->data + (*arena)->size;
+  memset(result, 0, size);
   (*arena)->size += size;
   return result;
 }

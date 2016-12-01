@@ -5,42 +5,47 @@
 typedef char byte;
 
 typedef struct {
-  int count, capacity;
+  int count, capacity, item_size;
   void* data;
 } Array;
 
-static void _arrayInit(Array* arr, int item_size, int capacity) {
+static void arrayInit(Array* arr, int capacity, int item_size) {
   arr->data = 0;
   arr->count = 0;
   arr->capacity = capacity;
+  arr->item_size = item_size;
   if (arr->capacity) {
-    arr->data = malloc(item_size * capacity);
+    arr->data = calloc(arr->item_size, capacity);
   }
 }
-#define arrayInit(type, arr, capacity) _arrayInit(arr, sizeof(type), capacity)
 
-static void* _arrayPush(Array* arr, int item_size) {
+static void* arrayPush(Array* arr) {
   if (!arr->data) {
-    arr->data = malloc(item_size * 4);
+    arr->data = calloc(arr->item_size, 4);
     arr->capacity = 4;
   }
   else if (arr->count == arr->capacity - 1) {
-    void* newData = malloc(item_size * arr->capacity * 2);
-    memcpy(newData, arr->data, item_size * arr->count);
-    free(arr->data);
-    arr->data = newData;
+    arr->data = realloc(arr->data, arr->item_size * arr->capacity * 2);
     arr->capacity *= 2;
   }
 
   ++arr->count;
-  return ((byte*) arr->data) + (item_size * (arr->count - 1));
+  byte* result = ((byte*) arr->data) + (arr->item_size * (arr->count - 1));
+  return result;
 }
-#define arrayPush(type, arr) ((type*) _arrayPush(arr, sizeof(type)))
 
-static void* _arrayGet(Array* arr, int item_size, int i) {
-  return ((byte*) arr->data) + (item_size * i);
+static void arrayPushVal(Array* arr, void* in) {
+  void* r = arrayPush(arr);
+  memcpy(r, in, arr->item_size);
 }
-#define arrayGet(type, arr, i) ((type*) _arrayGet(arr, sizeof(type), i))
+
+static void* arrayBegin(Array* arr) {
+  return arr->data;
+}
+
+static void* arrayGet(Array* arr, int i) {
+  return ((byte*) arr->data) + (arr->item_size * i);
+}
 
 static int arrayCount(Array* arr) {
   return arr->count;
@@ -68,38 +73,38 @@ static void arrayTest() {
 
   {
     Array a;
-    arrayInit(int, &a, 30);
+    arrayInit(&a, 30, sizeof(int));
     assert(arrayCount(&a) == 0);
     assert(arrayCapacity(&a) == 30);
-    *arrayPush(int, &a) = 100;
+    *(int*)arrayPush(&a) = 100;
     assert(arrayCount(&a) == 1);
     assert(arrayCapacity(&a) == 30);
-    assert(*arrayGet(int, &a, 0) == 100);
-    *arrayPush(int, &a) = 202;
+    assert(*(int*)arrayGet(&a, 0) == 100);
+    *(int*)arrayPush(&a) = 202;
     assert(arrayCount(&a) == 2);
     assert(arrayCapacity(&a) == 30);
-    assert(*arrayGet(int, &a, 0) == 100);
-    assert(*arrayGet(int, &a, 1) == 202);
-    *arrayGet(int, &a, 0) = 300;
-    assert(*arrayGet(int, &a, 0) == 300);
-    assert(*arrayGet(int, &a, 1) == 202);
+    assert(*(int*)arrayGet(&a, 0) == 100);
+    assert(*(int*)arrayGet(&a, 1) == 202);
+    *(int*)arrayGet(&a, 0) = 300;
+    assert(*(int*)arrayGet(&a, 0) == 300);
+    assert(*(int*)arrayGet(&a, 1) == 202);
   }
 
   {
     Array a;
-    arrayInit(int, &a, 0);
+    arrayInit(&a, 0, sizeof(int));
     assert(arrayCount(&a) == 0);
     assert(arrayCapacity(&a) == 0);
-    arrayPush(int, &a);
+    arrayPush(&a);
     assert(arrayCount(&a) == 1);
     assert(arrayCapacity(&a) == 4);
-    arrayPush(int, &a);
+    arrayPush(&a);
     assert(arrayCount(&a) == 2);
     assert(arrayCapacity(&a) == 4);
-    arrayPush(int, &a);
+    arrayPush(&a);
     assert(arrayCount(&a) == 3);
     assert(arrayCapacity(&a) == 4);
-    arrayPush(int, &a);
+    arrayPush(&a);
     assert(arrayCount(&a) == 4);
     assert(arrayCapacity(&a) == 8);
   }
