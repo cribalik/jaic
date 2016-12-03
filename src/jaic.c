@@ -211,10 +211,10 @@ static char* print_token() {
 
 static void eatToken() {
   prev_pos = next_pos;
-  logDebugInfo("before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column);
+  // logDebugInfo("before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column);
   token = gettok();
   eatWhitespace();
-  logDebugInfo("after gettok: line: %i column: %i\n", next_pos.line, next_pos.column);
+  // logDebugInfo("after gettok: line: %i column: %i\n", next_pos.line, next_pos.column);
   // printf("%s\n", print_token());
 }
 
@@ -247,9 +247,9 @@ typedef struct {
 // TODO: StructAST
 
 // some static types
-TypeAST voidType;
-TypeAST intType;
-TypeAST floatType;
+static TypeAST voidType;
+static TypeAST intType;
+static TypeAST floatType;
 
 void initTypes() {
   voidType.type = VOID;
@@ -259,6 +259,18 @@ void initTypes() {
   floatType.type = FLOAT;
   floatType.name = "float";
 }
+
+typedef struct {
+  char* name;
+  char* type_name;
+  TypeAST* type;
+} TypeMemberAST;
+
+typedef struct {
+  TypeAST parent;
+  int num_members;
+  TypeMemberAST* members;
+} StructAST;
 
 typedef struct {
   char* name;
@@ -318,13 +330,35 @@ static int test() {
 
 static MemArena perm_arena;
 
-static Array /*VariableDeclarationAST* */ variables;
-void addVariableDeclaration(VariableDeclarationAST* ast) {
-  VariableDeclarationAST** slot = arrayPush(&variables);
-  ZERO(slot);
+// struct list
+static Array types; /* TypeAST* */ 
+static TypeAST* getTypeDeclaration(char*);
+static void addTypeDeclaration(TypeAST* ast) {
+  if (getTypeDeclaration(ast->name)) {
+    logError(prev_pos, "Duplicate type '%s', already defined\n", ast->name);
+    // TODO: print position
+  }
+  // TODO: check if type exists
+  TypeAST** slot = arrayPush(&types);
   *slot = ast;
 }
-VariableDeclarationAST* getVariableDeclaration(char* name) {
+static TypeAST* getTypeDeclaration(char* name) {
+  TypeAST** it = arrayBegin(&types);
+  for (int i = 0, len = arrayCount(&types); i < len; ++i, ++it) {
+    if (strcmp(name, (*it)->name) == 0) {
+      return *it;
+    }
+  }
+  return 0;
+}
+
+// variable list
+static Array variables; /*VariableDeclarationAST* */
+static void addVariableDeclaration(VariableDeclarationAST* ast) {
+  VariableDeclarationAST** slot = arrayPush(&variables);
+  *slot = ast;
+}
+static VariableDeclarationAST* getVariableDeclaration(char* name) {
   VariableDeclarationAST** it = (VariableDeclarationAST**) arrayBegin(&variables);
   for (int i = 0, len = arrayCount(&variables); i < len; ++i, ++it) {
     if (strcmp(name, (*it)->name) == 0) {
@@ -334,12 +368,13 @@ VariableDeclarationAST* getVariableDeclaration(char* name) {
   return 0;
 }
 
-static Array /* FunctionDeclarationAST* */ functions;
-void addFunctionDeclaration(FunctionDeclarationAST* ast) {
+// function list
+static Array functions; /* FunctionDeclarationAST* */
+static void addFunctionDeclaration(FunctionDeclarationAST* ast) {
   FunctionDeclarationAST** slot = (FunctionDeclarationAST**) arrayPush(&functions);
   *slot = ast;
 }
-FunctionDeclarationAST* getFunctionDeclaration(char* name) {
+static FunctionDeclarationAST* getFunctionDeclaration(char* name) {
   FunctionDeclarationAST** it = (FunctionDeclarationAST**) arrayBegin(&functions);
   for (int i = 0, len = arrayCount(&functions); i < len; ++i, ++it) {
     if (strcmp(name, (*it)->name) == 0) {
@@ -363,6 +398,44 @@ static void* pushArrayToArena(Array* arr, MemArena* arena) {
   dest = arenaPush(arena, size);
   memcpy(dest, source, size);
   return dest;
+}
+
+static StructAST* parseTypeDeclaration() {
+  StructAST* type = arenaPush(&perm_arena, sizeof(StructAST));
+  eatToken();
+  Array /* TypeMemberAST */ members;
+  arrayInit(&members, 4, sizeof(TypeMemberAST));
+  while (1) {
+    TypeMemberAST* member = arrayPush(&members);
+    if (token == TOK_IDENTIFIER) {
+      member->name = pushString(&perm_arena, identifierStr);
+      eatToken();
+      if (token == ':') {
+        eatToken();
+        // TODO: can have value as well!
+        if (token == TOK_IDENTIFIER) {
+          member->type_name = pushString(&perm_arena, identifierStr);
+          eatToken();
+          if (token == ';') {
+            eatToken();
+            if (token == '}') {
+              eatToken();
+              break;
+            } else {
+              continue;
+            }
+          } else { logError(prev_pos, "Expected ';' after member definition\n"); }
+        } else { logError(prev_pos, "No type after member\n"); }
+      } else { logError(prev_pos, "No type after member. Did you forget a ':'?\n"); }
+    } else { logError(prev_pos, "Expected member name\n"); }
+
+    arrayFree(&members);
+    return 0;
+  }
+
+  type->num_members = arrayCount(&members);
+  type->members = pushArrayToArena(&members, &perm_arena);
+  return type;
 }
 
 /* (a,b) a+b) */
@@ -599,27 +672,19 @@ static ExpressionAST* parseExpression() {
 #define popState \
   arenaPopTo(&perm_arena, _arena_current);
 
-TypeAST* evaluateTypeFromName(char* name) {
-  logDebugInfo("Trying to evaluate type %s...\n", name);
-  if (strcmp(name, "int") == 0) {
-    return &intType;
-  }
-  if (strcmp(name, "float") == 0) {
-    return &floatType;
-  }
-
-  // logError(prev_pos, "Unknown type %s\n", name);
-  return 0;
+static void evaluateTypeOfStruct(StructAST* str) {
+  UNIMPLEMENTED;
+  // TODO, FIXME: check for recursive type
 }
 
-void evaluateTypeOfExpression(ExpressionAST*);
-void evaluateTypeOfVariable(VariableDeclarationAST* var) {
+static void evaluateTypeOfExpression(ExpressionAST*);
+static void evaluateTypeOfVariable(VariableDeclarationAST* var) {
   if (!var) return;
   if (!var->type) {
     TypeAST* declared_type = 0;
 
     if (var->type_name) {
-      declared_type = evaluateTypeFromName(var->type_name);
+      declared_type = getTypeDeclaration(var->type_name);
       if (!declared_type) {
         logError(prev_pos, "Declared type '%s' for '%s' doesn't exist\n", var->type_name, var->name);
         var->type = 0;
@@ -650,23 +715,23 @@ void evaluateTypeOfVariable(VariableDeclarationAST* var) {
   }
 }
 
-void evaluateTypeOfFunction(FunctionDeclarationAST* fun) {
+static void evaluateTypeOfFunction(FunctionDeclarationAST* fun) {
   if (!fun || fun->return_type) {
     return;
   }
   assert(fun->return_type_name); // return_type should have been set to void
 
   for (int i = 0; i < fun->num_args; ++i) {
-    fun->args[i].type = evaluateTypeFromName(fun->args[i].type_name);
+    fun->args[i].type = getTypeDeclaration(fun->args[i].type_name);
     if (!fun->args[i].type) {
       logError(fun->args[i].pos, "Could not find type '%s'\n", fun->args[i].type_name);
     }
   }
 
-  fun->return_type = evaluateTypeFromName(fun->return_type_name);
+  fun->return_type = getTypeDeclaration(fun->return_type_name);
 }
 
-void evaluateTypeOfExpression(ExpressionAST* expr) {
+static void evaluateTypeOfExpression(ExpressionAST* expr) {
   if (expr->type) {
     return;
   }
@@ -756,10 +821,13 @@ int main(int argc, char const *argv[]) {
   #endif
 
   // init globals
+  initTypes();
   arenaInit(&perm_arena);
+  arrayInit(&types, 16, sizeof(TypeAST*));
+  addTypeDeclaration(&intType);
+  addTypeDeclaration(&floatType);
   arrayInit(&variables, 16, sizeof(VariableDeclarationAST*));
   arrayInit(&functions, 16, sizeof(FunctionDeclarationAST*));
-  initTypes();
 
   eatToken();
   while (1) {
@@ -786,6 +854,23 @@ int main(int argc, char const *argv[]) {
           pushState;
           eatToken();
 
+          // type?
+          if (token == '{') {
+            pushState;
+            StructAST* ast = parseTypeDeclaration();
+            if (ast) {
+              if (!type) {
+                ast->parent.name = name;
+                addTypeDeclaration(&ast->parent);
+              } else {
+                logError(prev_pos, "You should not define a type of a type declaration!\n");
+              }
+            } else {
+              popState;
+            }
+            goto next;
+          }
+
           // TODO: switch function and expression checks
           // function?
           {
@@ -794,7 +879,7 @@ int main(int argc, char const *argv[]) {
               fun->name = name;
               fun->pos = prev_pos;
               if (type) {
-                logError(prev_pos, "Function declaration should not have type");
+                logError(prev_pos, "Function declaration should not have type\n");
               }
               else if (!is_declaration) {
                 logError(prev_pos, "Cannot redefine a function. (did you forget to do ':=' instead of just '='?)");
@@ -826,6 +911,7 @@ int main(int argc, char const *argv[]) {
               goto next;
             }
           }
+
 
           logError(prev_pos, "Neither expression or function prototype found after declaration\n");
           goto next;
@@ -867,7 +953,15 @@ int main(int argc, char const *argv[]) {
   type_pass:;
 
   {
-    VariableDeclarationAST** it = (VariableDeclarationAST**) arrayBegin(&variables);
+    TypeAST** it = arrayBegin(&types);
+    for (int i = 0, len = arrayCount(&types); i < len; ++i, ++it) {
+      if ((*it)->type == STRUCT) {
+        evaluateTypeOfStruct((StructAST*) *it);
+      }
+    }
+  }
+  {
+    VariableDeclarationAST** it = arrayBegin(&variables);
     for (int i = 0, len = arrayCount(&variables); i < len; ++i, ++it) {
       evaluateTypeOfVariable(*it);
       if ((*it)->type) {
@@ -877,7 +971,7 @@ int main(int argc, char const *argv[]) {
   }
 
   {
-    FunctionDeclarationAST** it = (FunctionDeclarationAST**) arrayBegin(&functions);
+    FunctionDeclarationAST** it = arrayBegin(&functions);
     for (int i = 0, len = arrayCount(&functions); i < len; ++i, ++it) {
       evaluateTypeOfFunction(*it);
       logDebugInfo("%s has return type %s\n", (*it)->name, (*it)->return_type->name);
