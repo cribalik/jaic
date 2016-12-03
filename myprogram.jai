@@ -1,8 +1,8 @@
-var1 := (3); // implicit type
+var1 := (3.0); // implicit type
 var2 := var1; // implicit type
 var3 : int = 3;
 var4 : float = 3.01;
-var5 := fun2(1, var1)
+var5 := fun2(1.0, var1)
 
 // declare a variable of type vec2, even though vec2 isn't defined yet!
 // TODO: struct initializers

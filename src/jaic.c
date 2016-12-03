@@ -1,5 +1,6 @@
 #define DEBUG
 
+#define USE_COLORS
 #include "terminal.c"
 #include "memarena.c"
 #include "utils.c"
@@ -9,6 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+
+#ifdef LINUX
+  #include <unistd.h>
+#endif
 
 typedef enum {
   TOK_EOF = -1,
@@ -24,31 +29,40 @@ typedef enum {
 static char* identifierStr;
 static double floatVal;
 static int intVal;
-static int line;
-static int column;
+
+typedef struct {
+  char* file;
+  int line;
+  int column;
+  fpos_t fpos;
+} FilePos;
+static FilePos prev_pos = {.line = 1, .column = 1};
+static FilePos next_pos = {.line = 1, .column = 1};
 
 // the input source file
 static FILE* file;
-static char* filename;
 
 static char getChar(FILE* file) {
   char c = getc(file);
-  ++column;
+  ++next_pos.column;
   if (c == '\n') {
-    ++line;
-    column = 0;
+    ++next_pos.line;
+    next_pos.column = 1;
   }
   return c;
 }
 
 static int curr_char = ' ';
+static void eatWhitespace() {
+  while (isspace(curr_char)) curr_char = getChar(file);
+}
 static int gettok() {
   #define BUFFER_SIZE 512
   static char buf[BUFFER_SIZE];
 
   while (isspace(curr_char)) {
     curr_char = getChar(file);
-    }
+  }
 
   // check for comments
   while (curr_char == '/') {
@@ -120,9 +134,10 @@ static int gettok() {
     }
 
     if (i == BUFFER_SIZE) {
-      logError("Reached max size for int\n");
+      logError(prev_pos, "Reached max size for int\n");
     }
     else if (curr_char == '.') {
+      buf[i++] = '.';
       curr_char = getChar(file);
       for (; i < BUFFER_SIZE && isdigit(curr_char); ++i) {
         buf[i] = curr_char;
@@ -130,7 +145,7 @@ static int gettok() {
       }
 
       if (i == BUFFER_SIZE) {
-        logError("Reached max size for float number\n");
+        logError(prev_pos, "Reached max size for float number\n");
       }
       // TODO: check for suffixes here e.g. 30.0f
       else {
@@ -195,7 +210,11 @@ static char* print_token() {
 }
 
 static void eatToken() {
+  prev_pos = next_pos;
+  logDebugInfo("before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column);
   token = gettok();
+  eatWhitespace();
+  logDebugInfo("after gettok: line: %i column: %i\n", next_pos.line, next_pos.column);
   // printf("%s\n", print_token());
 }
 
@@ -222,6 +241,7 @@ typedef enum {
 typedef struct {
   ExpressionType expr_type;
   TypeAST* type;
+  FilePos pos;
 } ExpressionAST;
 
 // TODO: StructAST
@@ -244,14 +264,16 @@ typedef struct {
   char* name;
   char* type_name;
   TypeAST* type;
+  FilePos pos;
 } ArgumentAST;
 
 typedef struct {
   char* name;
   int num_args;
-  ArgumentAST* args; // continuous strings of name1,type1, name2,type2, ...
+  ArgumentAST* args;
   char* return_type_name;
   TypeAST* return_type;
+  FilePos pos;
   // TODO: body??
 } FunctionDeclarationAST;
 
@@ -260,6 +282,7 @@ typedef struct {
   char* type_name;
   TypeAST* type;
   ExpressionAST* value;
+  FilePos pos;
 } VariableDeclarationAST;
 
 /* Expressions */
@@ -282,8 +305,8 @@ typedef struct {
 typedef struct {
   ExpressionAST parent;
   char* name;
-  int num_input;
-  ExpressionAST** input;
+  int num_args;
+  ExpressionAST** args;
 } CallAST;
 
 static int test() {
@@ -332,23 +355,30 @@ static char* pushString(MemArena* arena, char* str) {
   memcpy(result, str, len);
   return result;
 }
+static void* pushArrayToArena(Array* arr, MemArena* arena) {
+  int size;
+  void* source;
+  void* dest;
+  arrayGetData(arr, &source, &size);
+  dest = arenaPush(arena, size);
+  memcpy(dest, source, size);
+  return dest;
+}
 
 /* (a,b) a+b) */
 static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
   FunctionDeclarationAST* result = arenaPush(&perm_arena, sizeof(FunctionDeclarationAST));
   if (token != '(') {
     if (!try) {
-      logError("token %s not start of a function prototype\n", print_token(token));
+      logError(prev_pos, "token %s not start of a function prototype\n", print_token(token));
     }
     return 0;
   }
 
   // arguments
-  int num_args = 0;
-  result->args = arenaGetCurrent(perm_arena);
   eatToken();
   Array /* ArgumentAST* */ args;
-  // TODO, FIXME: actually remember arguments
+  arrayInit(&args, 0, sizeof(ArgumentAST));
   while (1) {
 
     if (token == ')') {
@@ -356,36 +386,41 @@ static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
       break;
     }
 
-    ++num_args;
+    ArgumentAST* arg = arrayPush(&args);
+    arg->pos = prev_pos;
 
     if (token != TOK_IDENTIFIER) {
       if (!try) {
-        logError("Identifier expected in parameter list, found %c\n", token);
+        logError(prev_pos, "Identifier expected in parameter list, found %c\n", token);
       }
+      arrayFree(&args);
       return 0;
     }
 
-    char* name = pushString(&perm_arena, identifierStr);
+    arg->name = pushString(&perm_arena, identifierStr);
     eatToken();
-    logDebugInfo("Found parameter %s\n", name);
+    logDebugInfo("Found parameter %s\n", arg->name);
 
     if (token != ':') {
       if (!try) {
-        logError("No type found after parameter name (did you forget a ':'?\n");
+        logError(prev_pos, "No type found after parameter name (did you forget a ':'?\n");
       }
+      arrayFree(&args);
       return 0;
     }
     eatToken();
 
     if (token != TOK_IDENTIFIER) {
       if (!try) {
-        logError("Typename expected after ':'\n");
+        logError(prev_pos, "Typename expected after ':'\n");
       }
+      arrayFree(&args);
       return 0;
     }
-    char* type = pushString(&perm_arena, identifierStr);
+
+    arg->type_name = pushString(&perm_arena, identifierStr);
     eatToken();
-    logDebugInfo(" - with type %s\n", type);
+    logDebugInfo(" - with type %s\n", arg->type_name);
 
     // TODO: default parameters
 
@@ -398,17 +433,20 @@ static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
     }
     else {
       logDebugInfo("Expected ',' or ')' after parameter\n");
+      arrayFree(&args);
       return 0;
     }
   }
-  result->num_args = num_args;
+  result->num_args = arrayCount(&args);
+  result->args = pushArrayToArena(&args, &perm_arena);
 
   // return value
   if (token == TOK_ARROW) {
     eatToken();
     if (token != TOK_IDENTIFIER) {
-      logError("Expected return type, got %s\n", print_token());
+      logError(prev_pos, "Expected return type, got %s\n", print_token());
       logDebugInfo("no type identifier after arrow");
+      arrayFree(&args);
       return 0;
     }
     result->return_type_name = pushString(&perm_arena, identifierStr);
@@ -419,7 +457,7 @@ static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
   }
 
   if (token != '{') {
-    logError("No '{' found after function parameter list\n");
+    logError(prev_pos, "No '{' found after function parameter list\n");
     return 0;
   }
   eatToken();
@@ -430,7 +468,7 @@ static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
     else if (token == '}') --depth;
     else if (token == TOK_EOF) {
       if (!try) {
-        logError("'{' never matched with a '}'");
+        logError(prev_pos, "'{' never matched with a '}'");
       }
       exit(1);
     }
@@ -441,10 +479,12 @@ static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
 }
 
 static ExpressionAST* parseExpression() {
+  FilePos pos = prev_pos;
   switch (token) {
     case TOK_FLOAT: {
       FloatAST* ast = arenaPush(&perm_arena, sizeof(FloatAST));
       ast->parent.expr_type = FLOAT_AST;
+      ast->parent.pos = pos;
       ast->value = floatVal;
       eatToken();
       logDebugInfo("Found a float literal with value %f\n", ast->value);
@@ -454,6 +494,7 @@ static ExpressionAST* parseExpression() {
     case TOK_INT: {
       IntAST* ast = arenaPush(&perm_arena, sizeof(IntAST));
       ast->parent.expr_type = INT_AST;
+      ast->parent.pos = pos;
       ast->value = intVal;
       eatToken();
       logDebugInfo("Found an int literal with value %i\n", ast->value);
@@ -466,12 +507,13 @@ static ExpressionAST* parseExpression() {
       eatToken();
       if (token == '(') {
 
+        // function call
         eatToken();
-        Array input;
-        arrayInit(&input, 0, sizeof(ExpressionAST*));
+        Array args;
+        arrayInit(&args, 0, sizeof(ExpressionAST*));
         ExpressionAST* expr = 0;
 
-        // get input arguments
+        // get args arguments
         while (1) {
           if (token == ')') {
             eatToken();
@@ -480,13 +522,13 @@ static ExpressionAST* parseExpression() {
 
           expr = parseExpression();
           if (!expr) {
-            logError("Invalid expression inside function call to '%s'\n", name);
+            logError(prev_pos, "Invalid expression inside function call to '%s'\n", name);
             arenaPopTo(&perm_arena, start);
-            arrayFree(&input);
+            arrayFree(&args);
             return 0;
           }
 
-          arrayPushVal(&input, &expr);
+          arrayPushVal(&args, &expr);
 
           if (token == ')') {
             eatToken();
@@ -495,28 +537,28 @@ static ExpressionAST* parseExpression() {
           if (token == ',') {
             eatToken();
           } else {
-            logError("Expected ',' between function input parameters\n");
+            logError(prev_pos, "Expected ',' between function input parameters\n");
           }
         }
 
         // push to permanent storage
         CallAST* call = arenaPush(&perm_arena, sizeof(CallAST));
+        call->parent.pos = pos;
         call->parent.expr_type = CALL_AST;
         call->name = name;
-        call->num_input = arrayCount(&input);
-        if (call->num_input > 0) {
-          ExpressionAST** dest = arenaPush(&perm_arena, sizeof(ExpressionAST*) * call->num_input);
-          memcpy(dest, arrayBegin(&input), sizeof(ExpressionAST*) * call->num_input);
-          call->input = dest;
+        call->num_args = arrayCount(&args);
+        if (call->num_args > 0) {
+          call->args = pushArrayToArena(&args, &perm_arena);
         }
-        arrayFree(&input);
+        arrayFree(&args);
 
-        logDebugInfo("Found function call to '%s' with %i inputs\n", call->name, call->num_input);
+        logDebugInfo("Found function call to '%s' with %i inputs\n", call->name, call->num_args);
         return &call->parent;
       }
       else {
         VariableGetAST* ast = arenaPush(&perm_arena, sizeof(VariableGetAST));
         ast->parent.expr_type = VARIABLE_AST;
+        ast->parent.pos = pos;
         ast->name = name;
         logDebugInfo("Found a variable get with name %s\n", name);
         return &ast->parent;
@@ -534,7 +576,7 @@ static ExpressionAST* parseExpression() {
     } break;
 
     default: {
-      logError("Expression expected, but found neither a literal, function call or a variable name, instead found %c\n", token);
+      logError(prev_pos, "Expression expected, but found neither a literal, function call or a variable name, instead found %c\n", token);
       return 0;
     } break;
   }
@@ -542,16 +584,15 @@ static ExpressionAST* parseExpression() {
 }
 
 #define pushPosition \
-  fpos_t _position; \
-  int _line = line; \
-  int _column = column; \
-  fgetpos(file, &_position); \
-  logDebugInfo("Pushing %s:%i:%i\n", filename, line+1, column);
-#define popPosition fsetpos(file, &_position); \
-  curr_char = ' '; \
-  line = _line; \
-  column = _column; \
-  logDebugInfo("Jumping back to %s:%i:%i\n", filename, line+1, column);
+  FilePos _position = next_pos; \
+  fgetpos(file, &_position.fpos); \
+  char _current_char = curr_char; \
+  logDebugInfo("Pushing %s:%i:%i\n", _position.file, _position.line, _position.column);
+#define popPosition \
+  fsetpos(file, &_position.fpos); \
+  next_pos = _position; \
+  curr_char = _current_char; \
+  logDebugInfo("Jumping back to %s:%i:%i\n", next_pos.file, next_pos.line, next_pos.column);
 
 #define pushState \
   void* _arena_current = arenaGetCurrent(perm_arena);
@@ -567,7 +608,7 @@ TypeAST* evaluateTypeFromName(char* name) {
     return &floatType;
   }
 
-  logError("Unknown type %s\n", name);
+  // logError(prev_pos, "Unknown type %s\n", name);
   return 0;
 }
 
@@ -580,7 +621,7 @@ void evaluateTypeOfVariable(VariableDeclarationAST* var) {
     if (var->type_name) {
       declared_type = evaluateTypeFromName(var->type_name);
       if (!declared_type) {
-        logError("Declared type '%s' for '%s' doesn't exist\n", var->type_name, var->name);
+        logError(prev_pos, "Declared type '%s' for '%s' doesn't exist\n", var->type_name, var->name);
         var->type = 0;
         return;
       }
@@ -590,7 +631,7 @@ void evaluateTypeOfVariable(VariableDeclarationAST* var) {
     if (var->value) {
       evaluateTypeOfExpression(var->value);
       if (!var->value->type) {
-        logError("Couldn't infer type for %s\n", var->name);
+        logError(prev_pos, "Couldn't infer type for %s\n", var->name);
         var->type = 0;
         return;
       }
@@ -599,7 +640,7 @@ void evaluateTypeOfVariable(VariableDeclarationAST* var) {
 
     // check that infered expression type and stated type match
     if (var->value && var->value->type && declared_type && var->value->type != declared_type) {
-      logError("Inferred type of '%s': '%s' differs from declared type '%s'\n", var->name, var->value->type->name, declared_type->name);
+      logError(prev_pos, "Inferred type of '%s': '%s' differs from declared type '%s'\n", var->name, var->value->type->name, declared_type->name);
       var->type = 0;
       return;
     }
@@ -614,6 +655,13 @@ void evaluateTypeOfFunction(FunctionDeclarationAST* fun) {
     return;
   }
   assert(fun->return_type_name); // return_type should have been set to void
+
+  for (int i = 0; i < fun->num_args; ++i) {
+    fun->args[i].type = evaluateTypeFromName(fun->args[i].type_name);
+    if (!fun->args[i].type) {
+      logError(fun->args[i].pos, "Could not find type '%s'\n", fun->args[i].type_name);
+    }
+  }
 
   fun->return_type = evaluateTypeFromName(fun->return_type_name);
 }
@@ -637,26 +685,32 @@ void evaluateTypeOfExpression(ExpressionAST* expr) {
       CallAST* call = (CallAST*) expr;
       FunctionDeclarationAST* fun = getFunctionDeclaration(call->name);
       if (!fun) {
-        logError("Unknown function '%s'", call->name);
+        logError(prev_pos, "Unknown function '%s'", call->name);
         return;
       }
 
+      // eval function
       if (!fun->return_type && fun->return_type_name) {
         evaluateTypeOfFunction(fun);
       }
 
+      // eval types of inputs
+      for (int i = 0; i < call->num_args; ++i) {
+        evaluateTypeOfExpression(call->args[i]);
+      }
+
       expr->type = fun->return_type;
       // check if the argument types are right
-      if (call->num_input > fun->num_args) {
-        logError("Too many arguments to function %s", fun->name);
+      if (call->num_args > fun->num_args) {
+        logError(prev_pos, "Too many arguments to function %s", fun->name);
       }
-      else if (call->num_input < fun->num_args) {
-        logError("Too few arguments to function %s", fun->name);
+      else if (call->num_args < fun->num_args) {
+        logError(prev_pos, "Too few arguments to function %s", fun->name);
       }
       else {
         for (int i = 0; i < fun->num_args; ++i) {
-          if (call->input[i]->type != fun->args[i].type) {
-            logError("input is type '%s', but prototype expects '%s'\n", call->input[i]->type->name, fun->args[i].type->name);
+          if (call->args[i]->type != fun->args[i].type) {
+            logError(call->args[i]->pos, "args is type '%s', but prototype expects '%s'\n", call->args[i]->type->name, fun->args[i].type->name);
           }
         }
       }
@@ -666,11 +720,11 @@ void evaluateTypeOfExpression(ExpressionAST* expr) {
       VariableGetAST* var_ref = (VariableGetAST*) expr;
       VariableDeclarationAST* var = getVariableDeclaration(var_ref->name);
       if (!var) {
-        logError("Use of undeclared variable '%s'", var_ref->name);
+        logError(prev_pos, "Use of undeclared variable '%s'", var_ref->name);
         return;
       }
-
       evaluateTypeOfVariable(var);
+      expr->type = var->type;
     } break;
   }
 }
@@ -682,17 +736,24 @@ int main(int argc, char const *argv[]) {
   (void) arenaPop;
 
   if (argc == 1) {
-    logError("Usage: %s <filename>\n", argv[0]);
+    logError(prev_pos, "Usage: %s <filename>\n", argv[0]);
     return 1;
   }
   else {
-    filename = (char*) argv[1];
+    next_pos.file = (char*) argv[1];
     file = fopen(argv[1], "r");
     if (!file) {
-      logError("Could not open file %s\n", argv[1]);
+      logError(prev_pos, "Could not open file %s\n", argv[1]);
       return 1;
     }
   }
+
+  // enable formatting?
+  #ifdef LINUX
+    if (isatty(1)) {
+      enableFormatting();
+    }
+  #endif
 
   // init globals
   arenaInit(&perm_arena);
@@ -706,6 +767,7 @@ int main(int argc, char const *argv[]) {
 
       case TOK_IDENTIFIER: {
         char* name = pushString(&perm_arena, identifierStr);
+        logDebugInfo("Found declaration identifier %s\n", name);
         char* type = 0;
         bool is_declaration = false;
         eatToken();
@@ -730,11 +792,12 @@ int main(int argc, char const *argv[]) {
             FunctionDeclarationAST* fun = parseFunctionDeclaration(true);
             if (fun) {
               fun->name = name;
+              fun->pos = prev_pos;
               if (type) {
-                logError("Function declaration should not have type");
+                logError(prev_pos, "Function declaration should not have type");
               }
               else if (!is_declaration) {
-                logError("Cannot redefine a function. (did you forget to do ':=' instead of just '='?)");
+                logError(prev_pos, "Cannot redefine a function. (did you forget to do ':=' instead of just '='?)");
               }
               // TODO: check if identifier already exists
               else {
@@ -753,6 +816,7 @@ int main(int argc, char const *argv[]) {
             ExpressionAST* value = parseExpression();
             if (value) {
               VariableDeclarationAST* var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
+              var->pos = prev_pos;
               var->name = name;
               var->type_name = type ? type : 0;
               var->value = value;
@@ -763,7 +827,7 @@ int main(int argc, char const *argv[]) {
             }
           }
 
-          logError("Neither expression or function prototype found after declaration\n");
+          logError(prev_pos, "Neither expression or function prototype found after declaration\n");
           goto next;
         }
 
@@ -779,7 +843,7 @@ int main(int argc, char const *argv[]) {
         }
 
         else {
-          logError("Unexpected token after ':' (variable declarations are not implemented yet - did you forget the '=' afterwards?)\n");
+          logError(prev_pos, "Unexpected token after ':' (variable declarations are not implemented yet - did you forget the '=' afterwards?)\n");
         }
 
       } break;
@@ -793,7 +857,7 @@ int main(int argc, char const *argv[]) {
       } break;
 
       default: {
-        logError("Unexpected token %c\n", token);
+        logError(prev_pos, "Unexpected token %c\n", token);
         return 0;
       } break;
     }

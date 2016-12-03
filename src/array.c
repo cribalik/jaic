@@ -52,6 +52,11 @@ static int arrayCount(Array* arr) {
 }
 #define arraySize arrayCount
 
+static void arrayGetData(Array* arr, void** data, int* size) {
+  *data = arr->data;
+  *size = arr->count * arr->item_size;
+}
+
 static int arrayCapacity(Array* arr) {
   return arr->capacity;
 }
