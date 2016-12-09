@@ -1,6 +1,0 @@
-found def token
-found float 100.000000
-found def token
-found float 200.000000
-found def token
-found identifier lol
