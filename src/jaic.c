@@ -1,5 +1,4 @@
 #define DEBUG
-
 #define USE_COLORS
 #include "terminal.c"
 #include "memarena.c"
@@ -15,6 +14,24 @@
   #include <unistd.h>
 #endif
 
+#define global static
+
+static char* pushString(MemArena* arena, char* str) {
+  int len = strlen(str) + 1;
+  char* result = arenaPush(arena, len);
+  memcpy(result, str, len);
+  return result;
+}
+static void* pushArrayToArena(DynArray* arr, MemArena* arena) {
+  int size;
+  void* source;
+  void* dest;
+  arrayGetData(arr, &source, &size);
+  dest = arenaPush(arena, size);
+  memcpy(dest, source, size);
+  return dest;
+}
+
 typedef enum {
   TOK_EOF = -1,
   TOK_IDENTIFIER = -3,
@@ -22,13 +39,36 @@ typedef enum {
   TOK_INT = -5,
   TOK_UNKNOWN = -6,
   TOK_ARROW = -7,
+  TOK_STRUCT = -8,
 } Token;
 
-
 // values set by the tokenizer
-static char* identifierStr;
-static double floatVal;
-static int intVal;
+global char* identifierStr;
+global double floatVal;
+global int intVal;
+
+// the input source file
+global FILE* file;
+
+#define MAIN_MEMORY_SIZE 64*1024*1024
+
+global MemArena perm_arena;
+
+#define pushPosition \
+  FilePos _position = next_pos; \
+  fgetpos(file, &_position.fpos); \
+  char _current_char = curr_char; \
+  logDebugInfo("Pushing %s:%i:%i\n", _position.file, _position.line, _position.column);
+#define popPosition \
+  fsetpos(file, &_position.fpos); \
+  next_pos = _position; \
+  curr_char = _current_char; \
+  logDebugInfo("Jumping back to %s:%i:%i\n", next_pos.file, next_pos.line, next_pos.column);
+
+#define pushState \
+  void* _arena_current = arenaGetCurrent(perm_arena);
+#define popState \
+  arenaPopTo(&perm_arena, _arena_current);
 
 typedef struct {
   char* file;
@@ -36,11 +76,8 @@ typedef struct {
   int column;
   fpos_t fpos;
 } FilePos;
-static FilePos prev_pos = {.line = 1, .column = 1};
-static FilePos next_pos = {.line = 1, .column = 1};
-
-// the input source file
-static FILE* file;
+global FilePos prev_pos = {.line = 1, .column = 1};
+global FilePos next_pos = {.line = 1, .column = 1};
 
 static char getChar(FILE* file) {
   char c = getc(file);
@@ -109,9 +146,12 @@ static int gettok() {
     while (isspace(curr_char)) {curr_char = getChar(file);};
   }
 
+  prev_pos = next_pos;
+
+  // identifier
   if (isalpha(curr_char)) {
     int i = 0;
-    for (i = 0; i < BUFFER_SIZE && (isalpha(curr_char) || isdigit(curr_char)); ++i) {
+    for (i = 0; i < BUFFER_SIZE && (isalpha(curr_char) || isdigit(curr_char) || curr_char=='_'); ++i) {
       buf[i] = curr_char;
       curr_char = getChar(file);
     }
@@ -122,10 +162,15 @@ static int gettok() {
     else {
       buf[i] = '\0';
       identifierStr = buf;
-      return TOK_IDENTIFIER;
+      if (strcmp(identifierStr, "type") == 0) {
+        return TOK_STRUCT;
+      } else {
+        return TOK_IDENTIFIER;
+      }
     }
   }
 
+  // number literal
   else if (isdigit(curr_char)) {
     int i;
     for (i = 0; i < BUFFER_SIZE && isdigit(curr_char); ++i) {
@@ -162,10 +207,12 @@ static int gettok() {
     }
   }
 
+  // eof
   else if (curr_char == EOF) {
     return TOK_EOF;
   }
 
+  // arrow
   else if (curr_char == '-') {
     curr_char = getChar(file);
     if (curr_char == '>') {
@@ -210,7 +257,6 @@ static char* print_token() {
 }
 
 static void eatToken() {
-  prev_pos = next_pos;
   // logDebugInfo("before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column);
   token = gettok();
   eatWhitespace();
@@ -229,6 +275,7 @@ typedef enum {
 typedef struct {
   char* name;
   Type type;
+  FilePos pos;
 } TypeAST;
 
 typedef enum {
@@ -236,6 +283,7 @@ typedef enum {
   INT_AST,
   CALL_AST,
   VARIABLE_AST,
+  STRUCT_INIT_AST,
 } ExpressionType;
 
 typedef struct {
@@ -244,14 +292,12 @@ typedef struct {
   FilePos pos;
 } ExpressionAST;
 
-// TODO: StructAST
-
 // some static types
-static TypeAST voidType;
-static TypeAST intType;
-static TypeAST floatType;
+global TypeAST voidType;
+global TypeAST intType;
+global TypeAST floatType;
 
-void initTypes() {
+static void initTypes() {
   voidType.type = VOID;
   voidType.name = "void";
   intType.type = INT;
@@ -264,13 +310,25 @@ typedef struct {
   char* name;
   char* type_name;
   TypeAST* type;
-} TypeMemberAST;
+  FilePos pos;
+} MemberAST;
+typedef struct {
+  TypeAST type;
+  int num_members;
+  MemberAST* members;
+  FilePos pos;
+} StructAST;
 
 typedef struct {
-  TypeAST parent;
+  char* name;
+  ExpressionAST* value;
+  MemberAST* member;
+} MemberInitializationAST;
+typedef struct {
+  ExpressionAST parent;
   int num_members;
-  TypeMemberAST* members;
-} StructAST;
+  MemberInitializationAST* members;
+} StructInitializationAST;
 
 typedef struct {
   char* name;
@@ -318,6 +376,7 @@ typedef struct {
   ExpressionAST parent;
   char* name;
   int num_args;
+  FunctionDeclarationAST* fun;
   ExpressionAST** args;
 } CallAST;
 
@@ -326,21 +385,26 @@ static int test() {
   return 0;
 }
 
-#define MAIN_MEMORY_SIZE 64*1024*1024
+typedef enum {
+  IdentifierType_UNKNOWN = 0,
+  IdentifierType_FUNCTION,
+  IdentifierType_VARIABLE,
+  IdentifierType_TYPE
+} IdentifierType;
 
-static MemArena perm_arena;
+static int isIdentifierDefined(char* identifier);
 
 // struct list
-static Array types; /* TypeAST* */ 
+global DynArray types; /* TypeAST* */ 
 static TypeAST* getTypeDeclaration(char*);
 static void addTypeDeclaration(TypeAST* ast) {
-  if (getTypeDeclaration(ast->name)) {
-    logError(prev_pos, "Duplicate type '%s', already defined\n", ast->name);
-    // TODO: print position
+  logDebugInfo("Adding type %s\n", ast->name);
+  if (!isIdentifierDefined(ast->name)) {
+    TypeAST** slot = arrayPush(&types);
+    *slot = ast;
   }
-  // TODO: check if type exists
-  TypeAST** slot = arrayPush(&types);
-  *slot = ast;
+  // TODO; print position
+  else {logError(ast->pos, "Identifier %s is already defined\n", ast->name);} 
 }
 static TypeAST* getTypeDeclaration(char* name) {
   TypeAST** it = arrayBegin(&types);
@@ -353,13 +417,17 @@ static TypeAST* getTypeDeclaration(char* name) {
 }
 
 // variable list
-static Array variables; /*VariableDeclarationAST* */
+global DynArray variables; /*VariableDeclarationAST* */
 static void addVariableDeclaration(VariableDeclarationAST* ast) {
-  VariableDeclarationAST** slot = arrayPush(&variables);
-  *slot = ast;
+  logDebugInfo("Adding variable declaration %s\n", ast->name);
+  if (!isIdentifierDefined(ast->name)) {
+    VariableDeclarationAST** slot = arrayPush(&variables);
+    *slot = ast;
+  }
+  else {logError(ast->pos, "Identifier %s is already defined\n", ast->name);}
 }
 static VariableDeclarationAST* getVariableDeclaration(char* name) {
-  VariableDeclarationAST** it = (VariableDeclarationAST**) arrayBegin(&variables);
+  VariableDeclarationAST** it = arrayBegin(&variables);
   for (int i = 0, len = arrayCount(&variables); i < len; ++i, ++it) {
     if (strcmp(name, (*it)->name) == 0) {
       return *it;
@@ -369,76 +437,52 @@ static VariableDeclarationAST* getVariableDeclaration(char* name) {
 }
 
 // function list
-static Array functions; /* FunctionDeclarationAST* */
+global DynArray functions; /* FunctionDeclarationAST* */
+static DynArray/*<FunctionDeclarationAST*>*/ getFunctionDeclarations(char* name);
 static void addFunctionDeclaration(FunctionDeclarationAST* ast) {
-  FunctionDeclarationAST** slot = (FunctionDeclarationAST**) arrayPush(&functions);
-  *slot = ast;
+  logDebugInfo("Adding function definition %s\n", ast->name);
+  int exists = isIdentifierDefined(ast->name);
+  if (exists == IdentifierType_UNKNOWN || exists == IdentifierType_FUNCTION) {
+    // TODO: check if function signature already exists
+    FunctionDeclarationAST** slot = (FunctionDeclarationAST**) arrayPush(&functions);
+    *slot = ast;
+  }
+  else {logError(ast->pos, "Identifier %s is already defined\n", ast->name);}
 }
-static FunctionDeclarationAST* getFunctionDeclaration(char* name) {
-  FunctionDeclarationAST** it = (FunctionDeclarationAST**) arrayBegin(&functions);
-  for (int i = 0, len = arrayCount(&functions); i < len; ++i, ++it) {
+static bool functionDeclarationExists(char* name) {
+  for (FunctionDeclarationAST** it = arrayBegin(&functions), **end = arrayEnd(&functions); it < end; ++it) {
     if (strcmp(name, (*it)->name) == 0) {
-      return *it;
+      return true;
     }
   }
-  return 0;
+  return false;
 }
-
-static char* pushString(MemArena* arena, char* str) {
-  int len = strlen(str) + 1;
-  char* result = arenaPush(arena, len);
-  memcpy(result, str, len);
-  return result;
-}
-static void* pushArrayToArena(Array* arr, MemArena* arena) {
-  int size;
-  void* source;
-  void* dest;
-  arrayGetData(arr, &source, &size);
-  dest = arenaPush(arena, size);
-  memcpy(dest, source, size);
-  return dest;
-}
-
-static StructAST* parseTypeDeclaration() {
-  StructAST* type = arenaPush(&perm_arena, sizeof(StructAST));
-  eatToken();
-  Array /* TypeMemberAST */ members;
-  arrayInit(&members, 4, sizeof(TypeMemberAST));
-  while (1) {
-    TypeMemberAST* member = arrayPush(&members);
-    if (token == TOK_IDENTIFIER) {
-      member->name = pushString(&perm_arena, identifierStr);
-      eatToken();
-      if (token == ':') {
-        eatToken();
-        // TODO: can have value as well!
-        if (token == TOK_IDENTIFIER) {
-          member->type_name = pushString(&perm_arena, identifierStr);
-          eatToken();
-          if (token == ';') {
-            eatToken();
-            if (token == '}') {
-              eatToken();
-              break;
-            } else {
-              continue;
-            }
-          } else { logError(prev_pos, "Expected ';' after member definition\n"); }
-        } else { logError(prev_pos, "No type after member\n"); }
-      } else { logError(prev_pos, "No type after member. Did you forget a ':'?\n"); }
-    } else { logError(prev_pos, "Expected member name\n"); }
-
-    arrayFree(&members);
-    return 0;
+static DynArray/*<FunctionDeclarationAST*>*/ getFunctionDeclarations(char* name) {
+  DynArray arr;
+  arrayInit(&arr, 0, sizeof(void*));
+  FunctionDeclarationAST** it = arrayBegin(&functions);
+  for (int i = 0, len = arrayCount(&functions); i < len; ++i, ++it) {
+    if (strcmp(name, (*it)->name) == 0) {
+      arrayPushVal(&arr, it);
+    }
   }
-
-  type->num_members = arrayCount(&members);
-  type->members = pushArrayToArena(&members, &perm_arena);
-  return type;
+  return arr;
 }
 
-/* (a,b) a+b) */
+static int isIdentifierDefined(char* identifier) {
+  if (functionDeclarationExists(identifier)) {
+    return IdentifierType_FUNCTION;
+  }
+  else if (getVariableDeclaration(identifier))  {
+    return IdentifierType_VARIABLE;
+  }
+  else if (getTypeDeclaration(identifier)) {
+    return IdentifierType_TYPE;
+  }
+  return IdentifierType_UNKNOWN;
+}
+
+/* (a:int, b:float)->int {a+b} */
 static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
   FunctionDeclarationAST* result = arenaPush(&perm_arena, sizeof(FunctionDeclarationAST));
   if (token != '(') {
@@ -450,7 +494,7 @@ static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
 
   // arguments
   eatToken();
-  Array /* ArgumentAST* */ args;
+  DynArray /* ArgumentAST* */ args;
   arrayInit(&args, 0, sizeof(ArgumentAST));
   while (1) {
 
@@ -526,7 +570,7 @@ static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
     eatToken();
   }
   else {
-    result->return_type = &voidType;
+    result->return_type_name = "void";
   }
 
   if (token != '{') {
@@ -582,7 +626,7 @@ static ExpressionAST* parseExpression() {
 
         // function call
         eatToken();
-        Array args;
+        DynArray args;
         arrayInit(&args, 0, sizeof(ExpressionAST*));
         ExpressionAST* expr = 0;
 
@@ -648,6 +692,62 @@ static ExpressionAST* parseExpression() {
       return result;
     } break;
 
+    case '{': {
+      eatToken();
+      StructInitializationAST* ast = arenaPush(&perm_arena, sizeof(StructInitializationAST));
+      ast->parent.expr_type = STRUCT_INIT_AST;
+      ast->parent.pos = pos;
+      if (token != '}') {
+        DynArray members;
+        arrayInit(&members, 4, sizeof(MemberInitializationAST));
+        while (1) {
+          MemberInitializationAST* member = arrayPush(&members);
+          bool success = false;
+          if (token == TOK_IDENTIFIER) {
+            member->name = pushString(&perm_arena, identifierStr);
+            eatToken();
+            if (token == '=') {
+              eatToken();
+              member->value = parseExpression();
+              if (member->value) {
+                if (token == ',') {
+                  eatToken();
+                  success = true;
+                } else if (token == '}') {
+                  eatToken();
+                  break;
+                } else {
+                  logError(prev_pos, "Expected ',' or '}', but found %s\n", print_token());
+                }
+              } else {logError(prev_pos, "Failed to parse expression\n");}
+            } else {logError(prev_pos, "Expected '=' after member name, found %s\n", print_token());}
+          } else {logError(prev_pos, "Expected identifier, instead found %s\n", print_token());}
+
+          if (!success) {
+            while (token != '}') {
+              eatToken();
+            }
+            eatToken();
+            ast = 0;
+            break;
+          }
+          //we failed, eat everything to matching brace
+        }
+        if (ast) {
+          ast->members = pushArrayToArena(&members, &perm_arena);
+          ast->num_members = arrayCount(&members);
+        }
+        arrayFree(&members);
+      } else {
+        eatToken();
+      }
+      if (ast) {
+        return &ast->parent;
+      } else {
+        return 0;
+      }
+    } break;
+
     default: {
       logError(prev_pos, "Expression expected, but found neither a literal, function call or a variable name, instead found %c\n", token);
       return 0;
@@ -656,28 +756,37 @@ static ExpressionAST* parseExpression() {
   return 0;
 }
 
-#define pushPosition \
-  FilePos _position = next_pos; \
-  fgetpos(file, &_position.fpos); \
-  char _current_char = curr_char; \
-  logDebugInfo("Pushing %s:%i:%i\n", _position.file, _position.line, _position.column);
-#define popPosition \
-  fsetpos(file, &_position.fpos); \
-  next_pos = _position; \
-  curr_char = _current_char; \
-  logDebugInfo("Jumping back to %s:%i:%i\n", next_pos.file, next_pos.line, next_pos.column);
-
-#define pushState \
-  void* _arena_current = arenaGetCurrent(perm_arena);
-#define popState \
-  arenaPopTo(&perm_arena, _arena_current);
-
-static void evaluateTypeOfStruct(StructAST* str) {
-  UNIMPLEMENTED;
+static void _evaluateTypeOfStruct(StructAST* str, DynArray* parents) {
+  for (int i = 0; i < str->num_members; ++i) {
+    if (!str->members[i].type) {
+      str->members[i].type = getTypeDeclaration(str->members[i].type_name);
+      if (!str->members[i].type) {
+        logError(str->members[i].pos, "Could not find type %s\n", str->members[i].type_name);
+        return;
+      }
+      if (str->members[i].type->type == STRUCT) {
+        for (char **parent = arrayBegin(parents), **end = arrayEnd(parents); parent != end; ++parent) {
+          if (strcmp(*parent, str->members[i].type->name) == 0) {
+            logError(str->members[i].pos, "Type %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
+            exit(1);
+          }
+        }
+        arrayPushVal(parents, &str->members[i].type->name);
+        _evaluateTypeOfStruct((StructAST*) str->members[i].type, parents);
+        arrayPop(parents);
+      }
+    }
+  }
   // TODO, FIXME: check for recursive type
 }
+static void evaluateTypeOfStruct(StructAST* str) {
+  DynArray parents;
+  arrayInit(&parents, 1, sizeof(char*));
+  arrayPushVal(&parents, &str->type.name);
+  _evaluateTypeOfStruct(str, &parents);
+}
 
-static void evaluateTypeOfExpression(ExpressionAST*);
+static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence);
 static void evaluateTypeOfVariable(VariableDeclarationAST* var) {
   if (!var) return;
   if (!var->type) {
@@ -686,7 +795,7 @@ static void evaluateTypeOfVariable(VariableDeclarationAST* var) {
     if (var->type_name) {
       declared_type = getTypeDeclaration(var->type_name);
       if (!declared_type) {
-        logError(prev_pos, "Declared type '%s' for '%s' doesn't exist\n", var->type_name, var->name);
+        logError(var->pos, "Declared type '%s' for '%s' doesn't exist\n", var->type_name, var->name);
         var->type = 0;
         return;
       }
@@ -694,9 +803,9 @@ static void evaluateTypeOfVariable(VariableDeclarationAST* var) {
     }
 
     if (var->value) {
-      evaluateTypeOfExpression(var->value);
+      evaluateTypeOfExpression(var->value, var->type);
       if (!var->value->type) {
-        logError(prev_pos, "Couldn't infer type for %s\n", var->name);
+        logError(var->pos, "Couldn't infer type for %s\n", var->name);
         var->type = 0;
         return;
       }
@@ -710,7 +819,6 @@ static void evaluateTypeOfVariable(VariableDeclarationAST* var) {
       return;
     }
 
-    logDebugInfo("Successfully inferred that '%s' has type '%s'\n", var->name, var->type->name);
     return;
   }
 }
@@ -731,7 +839,7 @@ static void evaluateTypeOfFunction(FunctionDeclarationAST* fun) {
   fun->return_type = getTypeDeclaration(fun->return_type_name);
 }
 
-static void evaluateTypeOfExpression(ExpressionAST* expr) {
+static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence) {
   if (expr->type) {
     return;
   }
@@ -748,36 +856,60 @@ static void evaluateTypeOfExpression(ExpressionAST* expr) {
 
     case CALL_AST: {
       CallAST* call = (CallAST*) expr;
-      FunctionDeclarationAST* fun = getFunctionDeclaration(call->name);
-      if (!fun) {
-        logError(prev_pos, "Unknown function '%s'", call->name);
+      logDebugInfo("Inferring call to %s\n", call->name);
+      DynArray funs = getFunctionDeclarations(call->name);
+      if (arrayCount(&funs)) {
+        // eval functions and find best match
+        int matches = 0;
+        for (FunctionDeclarationAST** it = arrayBegin(&funs), **end = arrayEnd(&funs); it < end; ++it) {
+          FunctionDeclarationAST* fun = *it;
+          if (!fun->return_type && fun->return_type_name) {
+            evaluateTypeOfFunction(fun);
+          }
+          // TODO: implicit type conversions?
+          bool match = true;
+          if (call->num_args != fun->num_args) {
+            match = false;
+          } else {
+            for (int i = 0; i < fun->num_args; ++i) {
+              call->args[i]->type = 0;
+              evaluateTypeOfExpression(call->args[i], fun->args[i].type);
+              if (call->args[i]->type != fun->args[i].type) {
+                match = false;
+                break;
+              }
+            }
+          }
+
+          if (match) {
+            ++matches;
+            call->fun = *it;
+            expr->type = (*it)->return_type;
+          }
+        }
+        if (matches > 1) {
+          // TODO: print out actual matches, and not all overload
+          logError(expr->pos, "Multiple matching overloads for %s.\n", call->name);
+          logNote("Overloads are:\n");
+          for (FunctionDeclarationAST** it = arrayBegin(&funs), **end = arrayEnd(&funs); it < end; ++it) {
+            logNoteAt((*it)->pos, "\n");
+          }
+        } else if (matches == 0) {
+          logError(expr->pos, "Could not find matching function overload for %s.\n", call->name);
+          logNote("Alternatives are:\n");
+          for (FunctionDeclarationAST** it = arrayBegin(&funs), **end = arrayEnd(&funs); it < end; ++it) {
+            logNoteAt((*it)->pos, "\n");
+          }
+        }
+
+      } else {
+        logError(call->parent.pos, "Unknown function '%s'\n", call->name);
         return;
       }
 
-      // eval function
-      if (!fun->return_type && fun->return_type_name) {
-        evaluateTypeOfFunction(fun);
-      }
 
-      // eval types of inputs
-      for (int i = 0; i < call->num_args; ++i) {
-        evaluateTypeOfExpression(call->args[i]);
-      }
-
-      expr->type = fun->return_type;
-      // check if the argument types are right
-      if (call->num_args > fun->num_args) {
-        logError(prev_pos, "Too many arguments to function %s", fun->name);
-      }
-      else if (call->num_args < fun->num_args) {
-        logError(prev_pos, "Too few arguments to function %s", fun->name);
-      }
-      else {
-        for (int i = 0; i < fun->num_args; ++i) {
-          if (call->args[i]->type != fun->args[i].type) {
-            logError(call->args[i]->pos, "args is type '%s', but prototype expects '%s'\n", call->args[i]->type->name, fun->args[i].type->name);
-          }
-        }
+      for (FunctionDeclarationAST** it = arrayEnd(&funs), **end = arrayEnd(&funs); it < end; ++it) {
+        logError((*it)->pos, "Alternative\n");
       }
     } break;
 
@@ -791,6 +923,41 @@ static void evaluateTypeOfExpression(ExpressionAST* expr) {
       evaluateTypeOfVariable(var);
       expr->type = var->type;
     } break;
+
+    case STRUCT_INIT_AST: {
+      StructInitializationAST* ast = (StructInitializationAST*) expr;
+      if (evidence) {
+        if (evidence->type == STRUCT) {
+          StructAST* target = (StructAST*) evidence;
+          bool all_match = true;
+          for (int i = 0; i < ast->num_members; ++i) {
+            // TODO: make sure each member is only mentioned once
+            bool name_match = false;
+            for (int j = 0; j < target->num_members; ++j) {
+              if (strcmp(ast->members[i].name, target->members[j].name) == 0) {
+                name_match = true;
+                ast->members[i].member = target->members + j;
+              }
+            }
+            if (!name_match) {
+              logError(expr->pos, "%s has no member %s\n", target->type.name, ast->members[i].name);
+              all_match = false;
+              break;
+            }
+            assert(ast->members[i].member->type);
+            evaluateTypeOfExpression(ast->members[i].value, ast->members[i].member->type);
+            if (ast->members[i].value->type != ast->members[i].member->type) {
+              logError(expr->pos, "The member '%s' in '%s' has type '%s', but the expression has type '%s'\n", ast->members[i].member->name, target->type.name, ast->members[i].member->type->name, ast->members[i].value->type->name);
+              all_match = false;
+              break;
+            }
+          }
+          if (all_match) {
+            expr->type = evidence;
+          }
+        } else {logError(expr->pos, "Cannot use struct initialization for non-struct type %s\n", evidence->name);}
+      } else {logError(expr->pos, "Not enough type information top evaluate type of struct initialization\n");}
+    }
   }
 }
 
@@ -826,6 +993,7 @@ int main(int argc, char const *argv[]) {
   arrayInit(&types, 16, sizeof(TypeAST*));
   addTypeDeclaration(&intType);
   addTypeDeclaration(&floatType);
+  addTypeDeclaration(&voidType);
   arrayInit(&variables, 16, sizeof(VariableDeclarationAST*));
   arrayInit(&functions, 16, sizeof(FunctionDeclarationAST*));
 
@@ -834,6 +1002,7 @@ int main(int argc, char const *argv[]) {
     switch (token) {
 
       case TOK_IDENTIFIER: {
+        FilePos pos_of_identifier = prev_pos;
         char* name = pushString(&perm_arena, identifierStr);
         logDebugInfo("Found declaration identifier %s\n", name);
         char* type = 0;
@@ -854,20 +1023,62 @@ int main(int argc, char const *argv[]) {
           pushState;
           eatToken();
 
-          // type?
-          if (token == '{') {
-            pushState;
-            StructAST* ast = parseTypeDeclaration();
-            if (ast) {
-              if (!type) {
-                ast->parent.name = name;
-                addTypeDeclaration(&ast->parent);
-              } else {
-                logError(prev_pos, "You should not define a type of a type declaration!\n");
+          // struct?
+          if (token == TOK_STRUCT) {
+            eatToken();
+            if (token == '{') {
+              eatToken();
+
+              StructAST* str = arenaPush(&perm_arena, sizeof(StructAST));
+              str->type.pos = pos_of_identifier;
+              str->type.type = STRUCT;
+              str->type.name = name;
+              DynArray members; /* MemberAST */
+              arrayInit(&members, 4, sizeof(MemberAST));
+              bool success = false;
+              while (1) {
+                MemberAST* member = arrayPush(&members);
+                if (token == TOK_IDENTIFIER) {
+                  member->name = pushString(&perm_arena, identifierStr);
+                  member->pos = prev_pos;
+                  eatToken();
+                  if (token == ':') {
+                    eatToken();
+                    // TODO: can have value as well!
+                    if (token == TOK_IDENTIFIER) {
+                      member->type_name = pushString(&perm_arena, identifierStr);
+                      eatToken();
+                      if (token == '}') {
+                        eatToken();
+                        success = true;
+                        break;
+                      } else {
+                        continue;
+                      }
+                    } else { logError(prev_pos, "No type after member\n"); }
+                  } else { logError(prev_pos, "No type after member. Did you forget a ':'?\n"); }
+                } else { logError(prev_pos, "Expected member name, instead found %s\n", print_token()); }
+                while (token != '}') {
+                  eatToken();
+                }
+                eatToken();
+                goto next;
               }
+
+              if (success) {
+                if (!type) {
+                  str->num_members = arrayCount(&members);
+                  str->members = pushArrayToArena(&members, &perm_arena);
+                  addTypeDeclaration((TypeAST*) str);
+                } else { logError(prev_pos, "You should not define a type of a type declaration (drop the type after ':')\n"); }
+              }
+              arrayFree(&members);
+              goto next;
             } else {
-              popState;
+              logError(pos_of_identifier, "Expected '{' after struct keyword\n");
             }
+
+
             goto next;
           }
 
@@ -877,12 +1088,13 @@ int main(int argc, char const *argv[]) {
             FunctionDeclarationAST* fun = parseFunctionDeclaration(true);
             if (fun) {
               fun->name = name;
-              fun->pos = prev_pos;
+              fun->pos = pos_of_identifier;
+              logDebugInfoAt(pos_of_identifier, "Function declaration for '%s' found\n", fun->name);
               if (type) {
-                logError(prev_pos, "Function declaration should not have type\n");
+                logError(pos_of_identifier, "Function declaration should not have type\n");
               }
               else if (!is_declaration) {
-                logError(prev_pos, "Cannot redefine a function. (did you forget to do ':=' instead of just '='?)");
+                logError(pos_of_identifier, "Cannot redefine a function. (did you forget to do ':=' instead of just '='?)");
               }
               // TODO: check if identifier already exists
               else {
@@ -901,7 +1113,7 @@ int main(int argc, char const *argv[]) {
             ExpressionAST* value = parseExpression();
             if (value) {
               VariableDeclarationAST* var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
-              var->pos = prev_pos;
+              var->pos = pos_of_identifier;
               var->name = name;
               var->type_name = type ? type : 0;
               var->value = value;
@@ -913,7 +1125,7 @@ int main(int argc, char const *argv[]) {
           }
 
 
-          logError(prev_pos, "Neither expression or function prototype found after declaration\n");
+          logError(pos_of_identifier, "Neither expression or function prototype found after declaration\n");
           goto next;
         }
 
@@ -957,15 +1169,17 @@ int main(int argc, char const *argv[]) {
     for (int i = 0, len = arrayCount(&types); i < len; ++i, ++it) {
       if ((*it)->type == STRUCT) {
         evaluateTypeOfStruct((StructAST*) *it);
+        logDebugInfo("Evaluated type of struct '%s'\n", (*it)->name);
       }
     }
   }
+
   {
     VariableDeclarationAST** it = arrayBegin(&variables);
     for (int i = 0, len = arrayCount(&variables); i < len; ++i, ++it) {
       evaluateTypeOfVariable(*it);
       if ((*it)->type) {
-        logDebugInfo("Evaluated type of '%s' to '%s'\n", (*it)->name, (*it)->type->name);
+        logDebugInfo("%s has type '%s'\n", (*it)->name, (*it)->type->name);
       }
     }
   }

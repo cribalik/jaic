@@ -1,44 +1,68 @@
-var1 := (3); // implicit type
-var2 := var1; // implicit type
-var3 : int = 3;
-var4 : float = 3.01;
-var5 := fun2(1, var1)
-
-// declare a variable of type vec2, even though vec2 isn't defined yet!
-// TODO: struct initializers
-// var5: vec2;
-
+// some variables
+var1 := (3)
+var2 := var1
+var3 : int = 3
+var4 : float = 3.01
+var5 := fun2(var4, var1)
+myvec2 : vec2
+mycomp : compound
+var6 := fun3(myvec2, mycomp)
+var7 : vec2 = {x = 3, y = 5}
+var8 : vec3 = {x = 3, y = 5}
+var9 : compound = {a = {x = 3, y = 5}}
+var10 := overfun({}, {})
+// var7 := vec2{x = 3, y = 5}
 
 // some functions
-fun1 := (a:int, b:float, c:int) -> int {/*this is a function body*/ };
-fun2 := (a:int, b:int) -> int {/*this is a function body*/};
-fun3 := () {};
+fun1 := (a:int, b:float, c:int) -> int {/*this is a function body*/ }
+fun2 := (a:float, b:int) -> int {/*this is a function body*/}
+fun3 := (a:vec2, b:compound) -> vec2 {/*this is a function body*/}
+fun4 := () {}
 
-distance := (a: vec2, b: int) -> float {
-  return sqrt((a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y));
+// function overloading is OK
+overfun := (a: vec2) {};
+overfun := (b: vec3) {};
+overfun := (a: int, b: float) {};
+result := overfun(1, 1.0);
+
+some_identifier := 3;
+// some_identifier := {a:int;}; // identifiers must be unique, this will error
+
+// some structs
+compound := type {
+  a: vec2
+  b: vec3
 }
 
-// some types
-vec3 := {
-  x: int;
-  y: int;
-  z: int;
-};
+compound2 := type {
+  a:int
+  b:int
+}
 
-vec2 := {
-  x: int;
-  y: int;
-};
+vec3 := type {
+  x: int
+  y: int
+  z: int
+}
 
-vec1 := {
-  x: int;
-};
+vec2 := type {
+  x: int
+  y: int
+}
 
-// a := vec2{x = 1, y = 3};
+// some nested structs
+B := type {
+  v: vec2
+  // a: A; // will cause error because A will contain itself
+}
+
+A := type {
+  b: B
+}
+
+
+// a: vec2 = {x = 1, y = 3};
 // b := vec2{x = 1, y = 3};
-// c: vec2 = {x = 1, y = 3};
-// d: vec2 = {x = 1, y = 3};
 
 // calculate distance between two points
-// result := distance()
-// myval := distance(vec2{x=1, y=2}, vec2{x=2, y=3});
+// dist := distance({x=1, y=2}, {x=2, y=3});

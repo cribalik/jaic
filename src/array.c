@@ -7,9 +7,9 @@ typedef char byte;
 typedef struct {
   int count, capacity, item_size;
   void* data;
-} Array;
+} DynArray;
 
-static void arrayInit(Array* arr, int capacity, int item_size) {
+static void arrayInit(DynArray* arr, int capacity, int item_size) {
   arr->data = 0;
   arr->count = 0;
   arr->capacity = capacity;
@@ -19,7 +19,7 @@ static void arrayInit(Array* arr, int capacity, int item_size) {
   }
 }
 
-static void* arrayPush(Array* arr) {
+static void* arrayPush(DynArray* arr) {
   if (!arr->data) {
     arr->data = calloc(arr->item_size, 4);
     arr->capacity = 4;
@@ -34,41 +34,50 @@ static void* arrayPush(Array* arr) {
   return result;
 }
 
-static void arrayPushVal(Array* arr, void* in) {
+static void arrayPushVal(DynArray* arr, void* in) {
   void* r = arrayPush(arr);
   memcpy(r, in, arr->item_size);
 }
 
-static void* arrayBegin(Array* arr) {
+static void* arrayBegin(DynArray* arr) {
   return arr->data;
 }
 
-static void* arrayGet(Array* arr, int i) {
+static void* arrayEnd(DynArray* arr) {
+  return arr->data + arr->count * arr->item_size;
+}
+
+static void* arrayGet(DynArray* arr, int i) {
   return ((byte*) arr->data) + (arr->item_size * i);
 }
 
-static int arrayCount(Array* arr) {
+static void arrayPop(DynArray* arr) {
+  assert(arr->count > 0);
+  --arr->count;
+}
+
+static int arrayCount(DynArray* arr) {
   return arr->count;
 }
 #define arraySize arrayCount
 
-static void arrayGetData(Array* arr, void** data, int* size) {
+static void arrayGetData(DynArray* arr, void** data, int* size) {
   *data = arr->data;
   *size = arr->count * arr->item_size;
 }
 
-static int arrayCapacity(Array* arr) {
+static int arrayCapacity(DynArray* arr) {
   return arr->capacity;
 }
 
-static void arrayFree(Array* arr) {
+static void arrayFree(DynArray* arr) {
   free(arr->data);
   arr->capacity = 0;
   arr->data = 0;
   arr->count = 0;
 }
 /*
-static void arrayFree(Array* arr) {
+static void arrayFree(DynArray* arr) {
   free(arr->data);
 }
 */
@@ -77,7 +86,7 @@ static void arrayFree(Array* arr) {
 static void arrayTest() {
 
   {
-    Array a;
+    DynArray a;
     arrayInit(&a, 30, sizeof(int));
     assert(arrayCount(&a) == 0);
     assert(arrayCapacity(&a) == 30);
@@ -96,7 +105,7 @@ static void arrayTest() {
   }
 
   {
-    Array a;
+    DynArray a;
     arrayInit(&a, 0, sizeof(int));
     assert(arrayCount(&a) == 0);
     assert(arrayCapacity(&a) == 0);

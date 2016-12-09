@@ -1,4 +1,6 @@
- * custom types (structs)
+# High
  * Binary operators
  * Multiple return values
- * Check for embedded types in struct
+
+# Low
+ * check for duplicate function overloads

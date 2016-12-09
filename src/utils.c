@@ -6,12 +6,20 @@
 
 #define ZERO(ptr) memset(ptr, 0, sizeof(*ptr))
 
+typedef struct {
+  void* data;
+  int size;
+} Array;
+
 // Logging
 #define logError(filepos, msg, ...) fprintf(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column);
+#define logNote(msg, ...) fprintf(stderr, "%s (%s:%i): %snote:%s%s " msg, BOLD, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__);
+#define logNoteAt(filepos, msg, ...) fprintf(stderr, "%s%s:%i:%i (%s:%i): %snote:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column);
 
 #ifdef DEBUG
 #define logDebugInfo(msg, ...) fprintf(stderr, "%s%s:%i: %sdebug:%s%s " msg, BOLD, __FILE__, __LINE__, GREEN, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__)
-#define logDebugError(msg, ...) fprintf(stderr, "%s%s:%i: %serror:%s%s" msg, BOLD, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__)
+#define logDebugInfoAt(filepos, msg, ...) fprintf(stderr, "%s%s:%i: %sdebug:%s%s " msg, BOLD, __FILE__, __LINE__, GREEN, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column);
+#define logDebugError(msg, ...) fprintf(stderr, "%s%s:%i: %serror:%s%s " msg, BOLD, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__)
 #else
 #define logDebugInfo(msg, ...)
 #define logDebugError(msg, ...)
@@ -45,7 +53,7 @@ void printLine(FILE* out, char* filename, int line, int column) {
 };
 
 // Some macros
-#define UNIMPLEMENTED logDebugError("Unimplemented function at %s:%d\n", __FILE__, __LINE__);
+#define UNIMPLEMENTED logDebugError("Unimplemented function at %s:%d\n", __FILE__, __LINE__); exit(1);
 #define UNREACHABLE logDebugError("Unreachable\n"); exit(1);
 
 // typedefs
