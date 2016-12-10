@@ -102,6 +102,7 @@ static void arrayTest() {
     *(int*)arrayGet(&a, 0) = 300;
     assert(*(int*)arrayGet(&a, 0) == 300);
     assert(*(int*)arrayGet(&a, 1) == 202);
+    arrayFree(&a);
   }
 
   {
@@ -121,6 +122,7 @@ static void arrayTest() {
     arrayPush(&a);
     assert(arrayCount(&a) == 4);
     assert(arrayCapacity(&a) == 8);
+    arrayFree(&a);
   }
 
 }

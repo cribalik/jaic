@@ -1,8 +1,8 @@
 // some variables
-var1 := (3)
+var1 := (3+5)+5
 var2 := var1
 var3 : int = 3
-var4 : float = 3.01
+var4 : float = 3.01+5.0
 var5 := fun2(var4, var1)
 myvec2 : vec2
 mycomp : compound
@@ -10,7 +10,7 @@ var6 := fun3(myvec2, mycomp)
 var7 : vec2 = {x = 3, y = 5}
 var8 : vec3 = {x = 3, y = 5}
 var9 : compound = {a = {x = 3, y = 5}}
-var10 := overfun({}, {})
+var10 := overfun(3, 3.0)
 // var7 := vec2{x = 3, y = 5}
 
 // some functions
@@ -18,6 +18,7 @@ fun1 := (a:int, b:float, c:int) -> int {/*this is a function body*/ }
 fun2 := (a:float, b:int) -> int {/*this is a function body*/}
 fun3 := (a:vec2, b:compound) -> vec2 {/*this is a function body*/}
 fun4 := () {}
+putc := (a:u8) -> void #foreign
 
 // function overloading is OK
 overfun := (a: vec2) {};
@@ -60,6 +61,9 @@ A := type {
   b: B
 }
 
+main := () {
+  putc(86);
+}
 
 // a: vec2 = {x = 1, y = 3};
 // b := vec2{x = 1, y = 3};
