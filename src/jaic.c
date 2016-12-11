@@ -512,6 +512,7 @@ static FunctionDeclarationAST* parseFunctionDeclaration(bool try) {
   }
   result->num_args = arrayCount(&args);
   result->args = pushArrayToArena(&args, &perm_arena);
+  arrayFree(&args);
 
   // return value
   if (token == TOK_ARROW) {
@@ -827,6 +828,7 @@ static void evaluateTypeOfStruct(StructAST* str, CompoundStatementAST* scope) {
   arrayInit(&parents, 1, sizeof(char*));
   arrayPushVal(&parents, &str->type.name);
   _evaluateTypeOfStruct(str, &parents, scope);
+  arrayFree(&parents);
 }
 
 static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, CompoundStatementAST* scope);
@@ -947,13 +949,12 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
 
       } else {
         logErrorAt(call->expr.stmt.pos, "Unknown function '%s'\n", call->name);
-        return;
       }
 
-
-      for (FunctionDeclarationAST** it = arrayEnd(&funs), **end = arrayEnd(&funs); it < end; ++it) {
-        logErrorAt((*it)->pos, "Alternative\n");
-      }
+      arrayFree(&funs);
+      // for (FunctionDeclarationAST** it = arrayEnd(&funs), **end = arrayEnd(&funs); it < end; ++it) {
+        // logErrorAt((*it)->pos, "Alternative\n");
+      // }
     } break;
 
     case VARIABLE_AST: {
@@ -1061,7 +1062,7 @@ StatementAST* parseStatement() {
             str->type.pos = pos_of_identifier;
             str->type.type = STRUCT;
             str->type.name = name;
-              DynArray members; /* MemberAST */
+            DynArray members; /* MemberAST */
             arrayInit(&members, 4, sizeof(MemberAST));
             bool success = false;
             while (1) {
@@ -1097,10 +1098,10 @@ StatementAST* parseStatement() {
               if (!type) {
                 str->num_members = arrayCount(&members);
                 str->members = pushArrayToArena(&members, &perm_arena);
+                arrayFree(&members);
                 return &str->type.stmt;
               } else { logErrorAt(prev_pos, "You should not define a type of a type declaration (drop the type after ':')\n"); }
             }
-            arrayFree(&members);
           } else {
             logErrorAt(pos_of_identifier, "Expected '{' after struct keyword\n");
           }
@@ -1222,6 +1223,38 @@ void doTypeInferenceForScope(CompoundStatementAST* scope) {
   }
 }
 
+void compile_type_to_c(FILE* header, FILE* structs, StructAST* str, DynArray* done) {
+  arrayPushVal(done, &str);
+
+  // check if we need to compile the members types first
+  for (int i = 0; i < str->num_members; ++i) {
+    MemberAST* member = str->members + i;
+    if (member->type->type == STRUCT) {
+      StructAST* membertype = (StructAST*) member->type;
+      bool has_been_compiled = false;
+      for (StructAST** s = arrayBegin(done), **end = arrayEnd(done); s != end; ++s) {
+        if (*s == membertype) {
+          has_been_compiled = true;
+        }
+      }
+      if (!has_been_compiled) {
+        compile_type_to_c(header, structs, membertype, done);
+      }
+    }
+  }
+
+  logDebugInfo("Compiling struct %s to C\n", str->type.name);
+
+  // TODO: fix indentation?
+  fprintf(header, "typedef struct jai_%s jai_%s;\n", str->type.name, str->type.name);
+  fprintf(structs, "typedef struct jai_%s {\n", str->type.name);
+  for (int i = 0; i < str->num_members; ++i) {
+    MemberAST* member = str->members + i;
+    fprintf(structs, "\t%s %s;\n", member->type->name, member->name);
+  }
+  fprintf(structs, "} jai_%s;\n\n", str->type.name);
+}
+
 int main(int argc, char const *argv[]) {
   #ifdef DEBUG
     test();
@@ -1307,45 +1340,133 @@ int main(int argc, char const *argv[]) {
     DynArray mains = getFunctionDeclarations("main", global_scope);
     if (arrayCount(&mains) == 1) {
       // TODO: check inparameters of main
-      FILE* head = tmpfile();
+      FILE* header = tmpfile();
       FILE* body = tmpfile();
       FILE* tail = tmpfile();
-      if (head && body && tail) {
+      if (body && header && tail) {
+
+        {
+          DynArray compiled_structs;
+          arrayInit(&compiled_structs, 16, sizeof(StructAST*));
+
+          // write types
+          for (int i = 0; i < global_scope->num_statements; ++i) {
+            StatementAST* stmt = global_scope->statements[i];
+            if (stmt->type == STRUCT_DECLARATION_STMT) {
+              StructAST* str = (StructAST*) stmt;
+              compile_type_to_c(header, body, str, &compiled_structs);
+            }
+          }
+
+          arrayFree(&compiled_structs);
+        }
+
+        {
+          for (int i = 0; i < global_scope->num_statements; ++i) {
+            StatementAST* stmt = global_scope->statements[i];
+            if (stmt->type == FUNCTION_DECLARATION_STMT) {
+              FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
+              if (fun->is_foreign) {continue;}
+              fprintf(header, "jai_%s", fun->name);
+              fprintf(body, "jai_%s", fun->name);
+
+              // name mangle
+              for (int i = 0; i < fun->num_args; ++i) {
+                ArgumentAST* arg = fun->args + i;
+                fprintf(header, "_%s", arg->type_name);
+                fprintf(body, "_%s", arg->type_name);
+              }
+
+              fprintf(header, "(");
+              fprintf(body, "(");
+              for (int i = 0; i < fun->num_args; ++i) {
+                ArgumentAST* arg = fun->args + i;
+                fprintf(header, "%s %s", arg->type_name, arg->name);
+                fprintf(body, "%s %s", arg->type_name, arg->name);
+                if (i != fun->num_args - 1) {
+                  fprintf(header, ", ");
+                  fprintf(body, ", ");
+                }
+              }
+              fprintf(header, ");\n");
+              fprintf(body, ") {\n");
+
+              // body
+              for (int i = 0; i < fun->num_statements; ++i) {
+                StatementAST* stmt = fun->body.statements[i];
+              }
+
+              fprintf(body, "};\n\n");
+            }
+          }
+        }
+
+        fprintf(tail, "int main(int argc, const char* argv[]) {\n\tjai_main();\n}\n");
+        /*
         FunctionDeclarationAST* mainf = *((FunctionDeclarationAST**) arrayGet(&mains, 0));
+        fprintf(tail, "int main(int argc, const char* argv[]) {\n");
+        for (int i = 0; i < mainf->body.num_statements; ++i) {
+          StatementAST* stmt = mainf->body.statements[i];
+          switch (stmt->type) {
+            case VARIABLE_DECLARATION_STMT: {
+              VariableDeclarationAST* var = (VariableDeclarationAST*) stmt;
+              fprintf(tail, "%s %s;", var->type->name, var->name);
+              if (var->value) {
+                fprintf(head, "void __jai__initialize_%s(%s\n", var->type->name, var->type->name);
+                fprintf(tail, ";\n");
+              }
+              // TODO: default initialization
+            } break;
+
+            case EXPRESSION_STMT: {
+
+            } break;
+
+            default:;
+          }
+        }
+          */
+        arrayFree(&mains);
 
         {
           char buf[256];
-          FILE* output = tmpfile();
+          FILE* output = fopen("/tmp/output.c", "w");
 
-          // write head
-          rewind(head);
-          while (1) {
-            int read = fread(buf, 256, 1, head);
-            if (!read) break;
-            fwrite(buf, read, 1, output);
-            if (feof(head)) break;
-          }
-          fclose(head);
+          if (output) {
 
-          // write body
-          rewind(body);
-          while (1) {
-            int read = fread(buf, 256, 1, body);
-            if (!read) break;
-            fwrite(buf, read, 1, output);
-            if (feof(body)) break;
-          }
-          fclose(body);
+            // write header
+            fprintf(output, "\n\n/*** HEADER ***/\n\n");
+            rewind(header);
+            while (1) {
+              int read = fread(buf, 1, 256, header);
+              fwrite(buf, read, 1, output);
+              if (feof(header)) break;
+            }
+            fclose(header);
 
-          // write tail
-          rewind(tail);
-          while (1) {
-            int read = fread(buf, 256, 1, tail);
-            if (!read) break;
-            fwrite(buf, read, 1, output);
-            if (feof(tail)) break;
+            // write body
+            fprintf(output, "\n\n/*** STRUCTS ***/\n\n");
+            rewind(body);
+            while (1) {
+              int read = fread(buf, 1, 256, body);
+              logDebugInfo("%.*s\n", read, buf);
+              fwrite(buf, read, 1, output);
+              if (feof(body)) break;
+            }
+            fclose(body);
+
+            // write tail
+            rewind(tail);
+            while (1) {
+              int read = fread(buf, 1, 256, tail);
+              fwrite(buf, read, 1, output);
+              if (feof(tail)) break;
+            }
+            fclose(tail);
+          } else {
+            logError("Could not open output file '/tmp/output.c'\n");
           }
-          fclose(tail);
+
         }
       } else {
         logError("Failed to open temp files\n");
