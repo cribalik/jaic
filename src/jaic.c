@@ -15,6 +15,7 @@
 #endif
 
 #define global static
+#define local_persist static
 
 static char* pushString(MemArena* arena, char* str) {
   int len = strlen(str) + 1;
@@ -322,7 +323,7 @@ typedef struct {
   FilePos pos;
 } TypeAST;
 
-TypeAST builtin_types[] = {
+global TypeAST builtin_types[] = {
   {},
   {.type = VOID, .name = "void"},
   {.type = INT, .name = "int"},
@@ -450,11 +451,11 @@ typedef enum {
   IdentifierType_TYPE
 } IdentifierType;
 
-StatementAST* parseStatement();
+static StatementAST* parseStatement();
 
 /* (a:int, b:float)->int {a+b} */
 static FunctionDeclarationAST* parseFunctionDeclaration(char* name, bool try) {
-  static int functionID = 0;
+  local_persist int functionID = 0;
   FunctionDeclarationAST* result = arenaPush(&perm_arena, sizeof(FunctionDeclarationAST));
   result->name = name;
   if (token != '(') {
@@ -763,7 +764,7 @@ static ExpressionAST* parseExpression() {
   return expr;
 }
 
-StatementAST* _parseStatement() {
+static StatementAST* _parseStatement() {
   switch (token) {
 
     case TOK_IDENTIFIER: {
@@ -942,7 +943,7 @@ StatementAST* _parseStatement() {
 
   return 0;
 }
-StatementAST* parseStatement() {
+static StatementAST* parseStatement() {
   while (1) {
     if (token == EOF) {
       return 0;
@@ -963,7 +964,7 @@ StatementAST* parseStatement() {
 
 static void evaluateTypeOfStruct(StructAST* str, CompoundStatementAST* scope);
 
-TypeAST* getTypeDeclaration(char* name, CompoundStatementAST* scope) {
+static TypeAST* getTypeDeclaration(char* name, CompoundStatementAST* scope) {
   // add the builtin to the global scope
   for (int i = 1; i < ARRSIZE(builtin_types); ++i) {
     if (strcmp(builtin_types[i].name, name) == 0) {
@@ -988,7 +989,7 @@ TypeAST* getTypeDeclaration(char* name, CompoundStatementAST* scope) {
   return 0;
 };
 
-DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope) {
+static DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope) {
   // TODO: builtin functions?
   DynArray funs;
   arrayInit(&funs, 2, sizeof(FunctionDeclarationAST*));
@@ -1007,7 +1008,7 @@ DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope) {
   return funs;
 }
 
-VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatementAST* scope) {
+static VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatementAST* scope) {
   while (scope) {
     for (int i = 0; i < scope->num_statements; ++i) {
       StatementAST* stmt = scope->statements[i];
@@ -1239,7 +1240,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
   }
 }
 
-void doTypeInferenceForScope(CompoundStatementAST* scope) {
+static void doTypeInferenceForScope(CompoundStatementAST* scope) {
   for (int i = 0; i < scope->num_statements; ++i) {
     StatementAST* stmt = scope->statements[i];
     switch (stmt->type) {
@@ -1284,10 +1285,10 @@ void doTypeInferenceForScope(CompoundStatementAST* scope) {
   }
 }
 
-void print_function_mangle(FILE* file, FunctionDeclarationAST* fun) {
+static void print_function_mangle(FILE* file, FunctionDeclarationAST* fun) {
   fprintf(file, "%s_%i", fun->name, fun->id);
 }
-void compile_type_to_c(FILE* header, FILE* structs, StructAST* str, DynArray* done) {
+static void compile_type_to_c(FILE* header, FILE* structs, StructAST* str, DynArray* done) {
   arrayPushVal(done, &str);
 
   // check if we need to compile the members types first
@@ -1318,7 +1319,7 @@ void compile_type_to_c(FILE* header, FILE* structs, StructAST* str, DynArray* do
   fprintf(structs, "} Jai_%s;\n\n", str->type.name);
 }
 
-void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
+static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
   switch (expr->expr_type) {
     case FLOAT_AST: {
       FloatAST* f = (FloatAST*) expr;
