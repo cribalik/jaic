@@ -16,9 +16,9 @@ var10 := overfun(3, 3.0)
 // some functions
 fun1 := (a:int, b:float, c:int) -> int {/*this is a function body*/ }
 fun2 := (a:float, b:int) -> int {/*this is a function body*/}
-fun3 := (a:vec2, b:compound) -> vec2 {/*this is a function body*/}
+fun3 := (a:vec2, b:compound) -> vec2 { fun2(0.1, 3); }
 fun4 := () {}
-putc := (a:u8) -> void #foreign
+putchar := (a:int) -> int #foreign
 
 // function overloading is OK
 overfun := (a: vec2) {};
@@ -62,11 +62,15 @@ A := type {
 }
 
 main := () {
-  putc(86);
+  putchar(104);
+  putchar(101);
+  putchar(108);
+  putchar(108);
+  putchar(111);
+  putchar(32);
+  putchar(119);
+  putchar(111);
+  putchar(114);
+  putchar(108);
+  putchar(100);
 }
-
-// a: vec2 = {x = 1, y = 3};
-// b := vec2{x = 1, y = 3};
-
-// calculate distance between two points
-// dist := distance({x=1, y=2}, {x=2, y=3});
