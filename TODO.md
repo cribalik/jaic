@@ -1,4 +1,5 @@
 # High
+ * struct member access
  * arrays
  * loops
  * pointers

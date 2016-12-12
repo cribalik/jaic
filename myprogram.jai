@@ -62,6 +62,12 @@ A := type {
 }
 
 main := () {
+
+  loop 0..10 {
+    putchar(104);
+  }
+
+  /*
   putchar(104);
   putchar(101);
   putchar(108);
@@ -73,4 +79,6 @@ main := () {
   putchar(114);
   putchar(108);
   putchar(100);
+  */
+
 }

@@ -41,6 +41,7 @@ typedef enum {
   TOK_UNKNOWN = -6,
   TOK_ARROW = -7,
   TOK_STRUCT = -8,
+  TOK_LOOP = -9,
 } Token;
 
 // values set by the tokenizer
@@ -183,6 +184,8 @@ static int gettok() {
       identifierStr = buf;
       if (strcmp(identifierStr, "type") == 0) {
         return TOK_STRUCT;
+      } else if (strcmp(identifierStr, "loop") == 0) {
+        return TOK_LOOP;
       } else {
         return TOK_IDENTIFIER;
       }
@@ -287,7 +290,44 @@ static void eatToken() {
   // printf("%s\n", print_token());
 }
 
-typedef enum {
+
+typedef struct ExpressionAST ExpressionAST;
+
+/* Statements */
+
+typedef enum StatementType {
+  UNKNOWN_STMT,
+  STRUCT_DECLARATION_STMT,
+  VARIABLE_DECLARATION_STMT,
+  FUNCTION_DECLARATION_STMT,
+  EXPRESSION_STMT,
+  COMPOUND_STMT, // new scope
+  LOOP_STMT,
+} StatementType;
+
+typedef struct StatementAST {
+  StatementType type;
+  FilePos pos;
+} StatementAST;
+
+typedef struct CompoundStatementAST {
+  StatementAST stmt;
+  struct CompoundStatementAST* parent_scope;
+  int num_statements;
+  StatementAST** statements;
+  // TODO: optimize variable lookups
+} CompoundStatementAST;
+
+typedef struct LoopAST {
+  StatementAST stmt;
+  ExpressionAST* from;
+  ExpressionAST* to;
+  CompoundStatementAST body;
+} LoopAST;
+
+/* Type */
+
+typedef enum Type {
   UNKNOWN,
   /* builtin types */
   VOID,
@@ -302,21 +342,7 @@ typedef enum {
   FUNCTION
 } Type;
 
-typedef enum {
-  UNKNOWN_STMT,
-  STRUCT_DECLARATION_STMT,
-  VARIABLE_DECLARATION_STMT,
-  FUNCTION_DECLARATION_STMT,
-  EXPRESSION_STMT,
-  COMPOUND_STMT, // new scope
-} StatementType;
-
-typedef struct {
-  StatementType type;
-  FilePos pos;
-} StatementAST;
-
-typedef struct {
+typedef struct TypeAST {
   StatementAST stmt;
   char* name;
   Type type;
@@ -331,60 +357,27 @@ global TypeAST builtin_types[] = {
   {.type = U8, .name = "u8"},
 };
 
-typedef enum {
-  FLOAT_AST,
-  INT_AST,
-  CALL_AST,
-  VARIABLE_AST,
-  STRUCT_INIT_AST,
-  BINOP_AST,
-} ExpressionType;
-
-typedef struct {
-  StatementAST stmt;
-  ExpressionType expr_type;
-  TypeAST* type;
-} ExpressionAST;
-
-typedef struct CompoundStatementAST {
-  StatementAST stmt;
-  struct CompoundStatementAST* parent_scope;
-  int num_statements;
-  StatementAST** statements;
-  // TODO: optimize variable lookups
-} CompoundStatementAST;
-
-typedef struct {
+typedef struct MemberAST {
   char* name;
   char* type_name;
   TypeAST* type;
   FilePos pos;
 } MemberAST;
-typedef struct {
+typedef struct StructAST {
   TypeAST type;
   int num_members;
   MemberAST* members;
 } StructAST;
 
-typedef struct {
-  char* name;
-  ExpressionAST* value;
-  MemberAST* member;
-} MemberInitializationAST;
-typedef struct {
-  ExpressionAST expr;
-  int num_members;
-  MemberInitializationAST* members;
-} StructInitializationAST;
+/* Functions */
 
-typedef struct {
+typedef struct ArgumentAST {
   char* name;
   char* type_name;
   TypeAST* type;
   FilePos pos;
 } ArgumentAST;
-
-typedef struct {
+typedef struct FunctionDeclarationAST {
   StatementAST stmt;
   int id;
   char* name;
@@ -397,7 +390,65 @@ typedef struct {
   CompoundStatementAST body;
 } FunctionDeclarationAST;
 
-typedef struct {
+/* Expressions */
+
+typedef enum ExpressionType {
+  FLOAT_AST,
+  INT_AST,
+  CALL_AST,
+  VARIABLE_AST,
+  STRUCT_INIT_AST,
+  BINOP_AST,
+} ExpressionType;
+
+typedef struct ExpressionAST {
+  StatementAST stmt;
+  ExpressionType expr_type;
+  TypeAST* type;
+} ExpressionAST;
+
+typedef struct MemberInitializationAST {
+  char* name;
+  ExpressionAST* value;
+  MemberAST* member;
+} MemberInitializationAST;
+typedef struct StructInitializationAST {
+  ExpressionAST expr;
+  int num_members;
+  MemberInitializationAST* members;
+} StructInitializationAST;
+
+typedef struct VariableGetAST {
+  ExpressionAST expr;
+  char* name;
+} VariableGetAST;
+
+typedef struct FloatAST {
+  ExpressionAST expr;
+  float value;
+} FloatAST;
+
+typedef struct IntAST {
+  ExpressionAST expr;
+  int value;
+} IntAST;
+
+typedef struct CallAST {
+  ExpressionAST expr;
+  char* name;
+  int num_args;
+  FunctionDeclarationAST* fun;
+  ExpressionAST** args;
+} CallAST;
+
+typedef struct BinaryExpressionAST {
+  ExpressionAST expr;
+  char operator;
+  ExpressionAST* lhs;
+  ExpressionAST* rhs;
+} BinaryExpressionAST;
+
+typedef struct VariableDeclarationAST {
   StatementAST stmt;
   char* name;
   char* type_name;
@@ -407,44 +458,12 @@ typedef struct {
   bool is_declaration;
 } VariableDeclarationAST;
 
-/* Expressions */
-
-typedef struct {
-  ExpressionAST expr;
-  char* name;
-} VariableGetAST;
-
-typedef struct {
-  ExpressionAST expr;
-  float value;
-} FloatAST;
-
-typedef struct {
-  ExpressionAST expr;
-  int value;
-} IntAST;
-
-typedef struct {
-  ExpressionAST expr;
-  char* name;
-  int num_args;
-  FunctionDeclarationAST* fun;
-  ExpressionAST** args;
-} CallAST;
-
-typedef struct {
-  ExpressionAST expr;
-  char operator;
-  ExpressionAST* lhs;
-  ExpressionAST* rhs;
-} BinaryExpressionAST;
-
 static int test() {
   arrayTest();
   return 0;
 }
 
-typedef enum {
+typedef enum IdentifierType {
   IdentifierType_UNKNOWN = 0,
   IdentifierType_FUNCTION,
   IdentifierType_VARIABLE,
@@ -453,11 +472,40 @@ typedef enum {
 
 static StatementAST* parseStatement();
 
+static int parseBlock(CompoundStatementAST* result) {
+  if (token != '{') {
+    return 1;
+  }
+  eatToken();
+  DynArray statements;
+  arrayInit(&statements, 32, sizeof(StatementAST*));
+  while (1) {
+    if (token == '}') {
+      eatToken();
+      break;
+    }
+    StatementAST* stmt = parseStatement();
+    if (stmt) {
+      arrayPushVal(&statements, &stmt);
+    } else {
+      logErrorAt(prev_pos, "Failed to parse statement\n");
+      arrayFree(&statements);
+      return 1;
+    }
+  }
+  result->num_statements = arrayCount(&statements);
+  result->statements = pushArrayToArena(&statements, &perm_arena);
+  result->stmt.type = COMPOUND_STMT;
+  arrayFree(&statements);
+  return 0;
+}
+
 /* (a:int, b:float)->int {a+b} */
 static FunctionDeclarationAST* parseFunctionDeclaration(char* name, bool try) {
   local_persist int functionID = 0;
   FunctionDeclarationAST* result = arenaPush(&perm_arena, sizeof(FunctionDeclarationAST));
   result->name = name;
+  result->stmt.pos = prev_pos;
   if (token != '(') {
     if (!try) {
       logErrorAt(prev_pos, "token %s not start of a function prototype\n", print_token(token));
@@ -558,25 +606,11 @@ static FunctionDeclarationAST* parseFunctionDeclaration(char* name, bool try) {
     }
   }
   else if (token == '{') {
-    eatToken();
-    DynArray statements;
-    arrayInit(&statements, 32, sizeof(StatementAST*));
-    while (1) {
-      if (token == '}') {
-        eatToken();
-        break;
-      }
-      StatementAST* stmt = parseStatement();
-      if (stmt) {
-        arrayPushVal(&statements, &stmt);
-      } else {
-        logErrorAt(prev_pos, "Failed to parse statement in %s\n", result->name);
-      }
+    if (parseBlock(&result->body)) {
+      logErrorAt(result->stmt.pos, "Failed to parse body for %s\n", result->name);
+      return 0;
     }
-    result->body.num_statements = arrayCount(&statements);
-    result->body.statements = pushArrayToArena(&statements, &perm_arena);
-    result->body.stmt.type = COMPOUND_STMT;
-    arrayFree(&statements);
+
   } else {
     logErrorAt(prev_pos, "No '{' or '#foreign' found after function parameter list\n");
     return 0;
@@ -669,7 +703,7 @@ static ExpressionAST* parsePrimitive() {
         ast->expr.expr_type = VARIABLE_AST;
         ast->expr.stmt.pos = pos;
         ast->name = name;
-        logDebugInfo("Found a variable get with name %s\n", name);
+        logDebugInfo("Found a variable get with name '%s'\n", name);
         return &ast->expr;
       }
     } break;
@@ -932,6 +966,39 @@ static StatementAST* _parseStatement() {
     } break;
 
     case TOK_EOF: {
+      return 0;
+    } break;
+
+    case TOK_LOOP: {
+      eatToken();
+      ExpressionAST* from = parseExpression();
+      if (from) {
+        if (token == '.') {
+          eatToken();
+          if (token == '.') {
+            eatToken();
+            ExpressionAST* to = parseExpression();
+            if (to) {
+              LoopAST* loop = arenaPush(&perm_arena, sizeof(LoopAST));
+              loop->stmt.type = LOOP_STMT;
+              loop->from = from;
+              loop->to = to;
+              // parse body
+              if (!parseBlock(&loop->body)) {
+                return &loop->stmt;
+              } else {
+                logError("Failed to parse body of loop\n");
+              }
+            } else {
+              logErrorAt(prev_pos, "Could not parse expression at end of loop\n");
+            }
+          } else {
+            logErrorAt(prev_pos, "Unexpected token %s. Did you mean to write '..'?", print_token());
+          }
+        }
+      } else {
+        logErrorAt(prev_pos, "Could not parse expression at start of loop\n");
+      }
       return 0;
     } break;
 
@@ -1278,6 +1345,14 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
         doTypeInferenceForScope(subscope);
       } break;
 
+      case LOOP_STMT: {
+        LoopAST* loop = (LoopAST*) stmt;
+        // TODO: not int, but size_t
+        evaluateTypeOfExpression(loop->from, &builtin_types[INT], scope);
+        evaluateTypeOfExpression(loop->to, &builtin_types[INT], scope);
+        doTypeInferenceForScope(&loop->body);
+      } break;
+
       case UNKNOWN_STMT: {
         logDebugError("Unknown statement\n");
       } break;
@@ -1355,6 +1430,34 @@ static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
   }
 }
 
+static void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
+  fprintf(file, "{\n");
+  for (int i = 0; i < block->num_statements; ++i) {
+    StatementAST* stmt = block->statements[i];
+    switch (stmt->type) {
+
+      case EXPRESSION_STMT: {
+        ExpressionAST* expr = (ExpressionAST*) stmt;
+        compile_expression_to_c(expr, file);
+        fprintf(file, ";\n");
+      } break;
+
+      case LOOP_STMT: {
+        LoopAST* loop = (LoopAST*) stmt;
+        // TODO: use size_t instead
+        fprintf(file, "for (int it_index = ");
+        compile_expression_to_c(loop->from, file);
+        fprintf(file, ", jai_end_index = ");
+        compile_expression_to_c(loop->to, file);
+        fprintf(file, "; it_index < jaiend; ++it_index) ");
+        compile_block_to_c(&loop->body, file);
+      } break;
+
+    }
+  }
+  fprintf(file, "};\n\n");
+}
+
 int main(int argc, char const *argv[]) {
   #ifdef DEBUG
     test();
@@ -1410,7 +1513,7 @@ int main(int argc, char const *argv[]) {
           arrayPushVal(&statements, &stmt);
           logDebugInfo("Adding type %s\n", ((StructAST*) stmt)->type.name);
         } break;
-        default: 
+        default:
           logError("Only variable, struct and function definitions allowed at global scope\n");
       }
     } else {
@@ -1539,22 +1642,10 @@ int main(int argc, char const *argv[]) {
                   }
                 }
                 fprintf(header, ");\n");
-                fprintf(body, ") {\n");
+                fprintf(body, ") ");
 
-                // body
-                for (int i = 0; i < fun->body.num_statements; ++i) {
-                  StatementAST* stmt = fun->body.statements[i];
-                  switch (stmt->type) {
-                    case EXPRESSION_STMT: {
-                      ExpressionAST* expr = (ExpressionAST*) stmt;
-                      compile_expression_to_c(expr, body);
-                      fprintf(body, ";\n");
-                    } break;
-                  }
-                }
-                fprintf(body, "};\n\n");
+                compile_block_to_c(&fun->body, body);
               }
-
             }
           }
         }
