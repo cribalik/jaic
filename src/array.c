@@ -4,6 +4,11 @@
 
 typedef char byte;
 
+typedef struct Array {
+  int count;
+  void* data;
+} Array;
+
 typedef struct {
   int count, capacity, item_size;
   void* data;
@@ -81,6 +86,11 @@ static void arrayFree(DynArray* arr) {
   free(arr->data);
 }
 */
+
+static Array arrayToArray(DynArray* arr) {
+  Array result = {.count = arr->count, .data = arr->data};
+  return result;
+}
 
 #ifdef DEBUG
 static void arrayTest() {

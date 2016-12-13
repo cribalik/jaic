@@ -1,5 +1,4 @@
 #define DEBUG
-#define USE_COLORS
 #include "terminal.c"
 #include "memarena.c"
 #include "utils.c"
@@ -42,6 +41,7 @@ typedef enum {
   TOK_ARROW = -7,
   TOK_STRUCT = -8,
   TOK_LOOP = -9,
+  TOK_DOUBLEDOT = -10,
 } Token;
 
 // values set by the tokenizer
@@ -206,19 +206,29 @@ static int gettok() {
     else if (curr_char == '.') {
       buf[i++] = '.';
       curr_char = getChar(file);
-      for (; i < BUFFER_SIZE && isdigit(curr_char); ++i) {
-        buf[i] = curr_char;
-        curr_char = getChar(file);
-      }
+      if (isdigit(curr_char)) {
+        for (; i < BUFFER_SIZE && isdigit(curr_char); ++i) {
+          buf[i] = curr_char;
+          curr_char = getChar(file);
+        }
 
-      if (i == BUFFER_SIZE) {
-        logErrorAt(prev_pos, "Reached max size for float number\n");
+        if (i == BUFFER_SIZE) {
+          logErrorAt(prev_pos, "Reached max size for float number\n");
+        }
+        // TODO: check for suffixes here e.g. 30.0f
+        else {
+          buf[i] = '\0';
+          floatVal = strtod(buf, NULL);
+          return TOK_FLOAT;
+        }
       }
-      // TODO: check for suffixes here e.g. 30.0f
-      else {
-        buf[i] = '\0';
-        floatVal = strtod(buf, NULL);
-        return TOK_FLOAT;
+      else if (curr_char == '.') {
+        fseek(file, -1, SEEK_CUR);
+        buf[i-1] = '\0';
+        intVal = atoi(buf);
+        return TOK_INT;
+      } else {
+        logErrorAt(prev_pos, "Unexpected character '%c', expected floating point number or '..'\n", curr_char);
       }
     }
     // TODO: check for suffixes here e.g. 10u32
@@ -242,6 +252,17 @@ static int gettok() {
       return TOK_ARROW;
     } else {
       return '-';
+    }
+  }
+
+  // double dots
+  else if (curr_char == '.') {
+    curr_char = getChar(file);
+    if (curr_char == '.') {
+      curr_char = getChar(file);
+      return TOK_DOUBLEDOT;
+    } else {
+      return '.';
     }
   }
 
@@ -454,7 +475,6 @@ typedef struct VariableDeclarationAST {
   char* type_name;
   TypeAST* type;
   ExpressionAST* value;
-  FilePos pos;
   bool is_declaration;
 } VariableDeclarationAST;
 
@@ -472,13 +492,19 @@ typedef enum IdentifierType {
 
 static StatementAST* parseStatement();
 
-static int parseBlock(CompoundStatementAST* result) {
+static int parseBlock(CompoundStatementAST* result, DynArray* prefix) {
   if (token != '{') {
     return 1;
   }
   eatToken();
   DynArray statements;
-  arrayInit(&statements, 32, sizeof(StatementAST*));
+  DynArray* array;
+  if (prefix) {
+    array = prefix;
+  } else {
+    array = &statements;
+    arrayInit(array, 32, sizeof(StatementAST*));
+  }
   while (1) {
     if (token == '}') {
       eatToken();
@@ -486,17 +512,17 @@ static int parseBlock(CompoundStatementAST* result) {
     }
     StatementAST* stmt = parseStatement();
     if (stmt) {
-      arrayPushVal(&statements, &stmt);
+      arrayPushVal(array, &stmt);
     } else {
       logErrorAt(prev_pos, "Failed to parse statement\n");
-      arrayFree(&statements);
+      arrayFree(array);
       return 1;
     }
   }
-  result->num_statements = arrayCount(&statements);
-  result->statements = pushArrayToArena(&statements, &perm_arena);
+  result->num_statements = arrayCount(array);
+  result->statements = pushArrayToArena(array, &perm_arena);
   result->stmt.type = COMPOUND_STMT;
-  arrayFree(&statements);
+  arrayFree(array);
   return 0;
 }
 
@@ -606,7 +632,7 @@ static FunctionDeclarationAST* parseFunctionDeclaration(char* name, bool try) {
     }
   }
   else if (token == '{') {
-    if (parseBlock(&result->body)) {
+    if (parseBlock(&result->body, 0)) {
       logErrorAt(result->stmt.pos, "Failed to parse body for %s\n", result->name);
       return 0;
     }
@@ -921,7 +947,7 @@ static StatementAST* _parseStatement() {
           if (value) {
             VariableDeclarationAST* var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
             var->stmt.type = VARIABLE_DECLARATION_STMT;
-            var->pos = pos_of_identifier;
+            var->stmt.pos = pos_of_identifier;
             var->name = name;
             var->type_name = type ? type : 0;
             var->value = value;
@@ -970,35 +996,43 @@ static StatementAST* _parseStatement() {
     } break;
 
     case TOK_LOOP: {
+      FilePos pos = prev_pos;
       eatToken();
       ExpressionAST* from = parseExpression();
       if (from) {
-        if (token == '.') {
+        if (token == TOK_DOUBLEDOT) {
           eatToken();
-          if (token == '.') {
-            eatToken();
-            ExpressionAST* to = parseExpression();
-            if (to) {
-              LoopAST* loop = arenaPush(&perm_arena, sizeof(LoopAST));
-              loop->stmt.type = LOOP_STMT;
-              loop->from = from;
-              loop->to = to;
-              // parse body
-              if (!parseBlock(&loop->body)) {
-                return &loop->stmt;
-              } else {
-                logError("Failed to parse body of loop\n");
-              }
-            } else {
-              logErrorAt(prev_pos, "Could not parse expression at end of loop\n");
+          ExpressionAST* to = parseExpression();
+          if (to) {
+            LoopAST* loop = arenaPush(&perm_arena, sizeof(LoopAST));
+            loop->stmt.type = LOOP_STMT;
+            loop->stmt.pos = pos;
+            loop->from = from;
+            loop->to = to;
+            // parse body
+            VariableDeclarationAST* it = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
+            VariableDeclarationAST* it_index = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
+            {
+              it->stmt.type = VARIABLE_DECLARATION_STMT;
+              it->stmt.pos = prev_pos;
+              it->name = "it";
+              it->is_declaration = true;
+              it_index->stmt.type = VARIABLE_DECLARATION_STMT;
+              it_index->stmt.pos = prev_pos;
+              it_index->name = "it_index";
+              it_index->type = &builtin_types[INT];
+              it_index->is_declaration = true;
             }
-          } else {
-            logErrorAt(prev_pos, "Unexpected token %s. Did you mean to write '..'?", print_token());
-          }
-        }
-      } else {
-        logErrorAt(prev_pos, "Could not parse expression at start of loop\n");
-      }
+            DynArray prefix;
+            arrayInit(&prefix, 2, sizeof(StatementAST*));
+            arrayPushVal(&prefix, &it);
+            arrayPushVal(&prefix, &it_index);
+            if (!parseBlock(&loop->body, &prefix)) {
+              return &loop->stmt;
+            } else {logError("Failed to parse body of loop\n"); }
+          } else {logErrorAt(prev_pos, "Could not parse expression at end of loop\n"); }
+        } else {logErrorAt(prev_pos, "Unexpected token %s. Did you mean to write '..'?", print_token()); }
+      } else {logErrorAt(prev_pos, "Could not parse expression at start of loop\n"); }
       return 0;
     } break;
 
@@ -1130,7 +1164,7 @@ static void evaluateTypeOfVariable(VariableDeclarationAST* var, CompoundStatemen
     if (var->type_name) {
       declared_type = getTypeDeclaration(var->type_name, scope);
       if (!declared_type) {
-        logErrorAt(var->pos, "Declared type '%s' for '%s' doesn't exist\n", var->type_name, var->name);
+        logErrorAt(var->stmt.pos, "Declared type '%s' for '%s' doesn't exist\n", var->type_name, var->name);
         var->type = 0;
         return;
       }
@@ -1140,7 +1174,7 @@ static void evaluateTypeOfVariable(VariableDeclarationAST* var, CompoundStatemen
     if (var->value) {
       evaluateTypeOfExpression(var->value, var->type, scope);
       if (!var->value->type) {
-        logErrorAt(var->pos, "Couldn't infer type for %s\n", var->name);
+        logErrorAt(var->stmt.pos, "Couldn't infer type for %s\n", var->name);
         var->type = 0;
         return;
       }
@@ -1251,7 +1285,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
       VariableGetAST* var_ref = (VariableGetAST*) expr;
       VariableDeclarationAST* var = getVariableDeclaration(var_ref->name, scope);
       if (!var) {
-        logErrorAt(prev_pos, "Use of undeclared variable '%s'", var_ref->name);
+        logErrorAt(var_ref->expr.stmt.pos, "Use of undeclared variable '%s'", var_ref->name);
         return;
       }
       evaluateTypeOfVariable(var, scope);
@@ -1320,7 +1354,7 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
       case VARIABLE_DECLARATION_STMT: {
         VariableDeclarationAST* var = (VariableDeclarationAST*) stmt;
         evaluateTypeOfVariable(var, scope);
-        logDebugInfoAt(var->pos, "Evaluated type of '%s' to \n", var->name);
+        logDebugInfoAt(var->stmt.pos, "Evaluated type of '%s' to \n", var->name);
       } break;
 
       case FUNCTION_DECLARATION_STMT: {
@@ -1347,9 +1381,19 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
 
       case LOOP_STMT: {
         LoopAST* loop = (LoopAST*) stmt;
+        loop->body.parent_scope = scope;
         // TODO: not int, but size_t
         evaluateTypeOfExpression(loop->from, &builtin_types[INT], scope);
         evaluateTypeOfExpression(loop->to, &builtin_types[INT], scope);
+        if (!loop->from->type || !loop->to->type) {
+          logErrorAt(loop->from->stmt.pos, "Loop indexes are not integers\n");
+        }
+        if (loop->from->type != loop->to->type) {
+          logErrorAt(loop->from->stmt.pos, "Types of start index and stop index differ\n");
+        }
+        VariableDeclarationAST* it = (VariableDeclarationAST*) loop->body.statements[0];
+        assert(strcmp(it->name, "it") == 0);
+        it->type = loop->from->type;
         doTypeInferenceForScope(&loop->body);
       } break;
 
@@ -1409,7 +1453,7 @@ static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
     case VARIABLE_AST: {
       VariableGetAST* var = (VariableGetAST*) expr;
       fprintf(body, "Jai_%s", var->name);
-    }
+    } break;
 
     case CALL_AST: {
       CallAST* call = (CallAST*) expr;
@@ -1430,32 +1474,42 @@ static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
   }
 }
 
-static void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
-  fprintf(file, "{\n");
-  for (int i = 0; i < block->num_statements; ++i) {
-    StatementAST* stmt = block->statements[i];
-    switch (stmt->type) {
+static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
+  switch (stmt->type) {
 
-      case EXPRESSION_STMT: {
-        ExpressionAST* expr = (ExpressionAST*) stmt;
-        compile_expression_to_c(expr, file);
-        fprintf(file, ";\n");
-      } break;
+    case EXPRESSION_STMT: {
+      ExpressionAST* expr = (ExpressionAST*) stmt;
+      fprintf(file, "\n");
+      compile_expression_to_c(expr, file);
+      fprintf(file, ";");
+    } break;
 
-      case LOOP_STMT: {
-        LoopAST* loop = (LoopAST*) stmt;
+    case LOOP_STMT: {
+      LoopAST* loop = (LoopAST*) stmt;
         // TODO: use size_t instead
-        fprintf(file, "for (int it_index = ");
-        compile_expression_to_c(loop->from, file);
-        fprintf(file, ", jai_end_index = ");
-        compile_expression_to_c(loop->to, file);
-        fprintf(file, "; it_index < jaiend; ++it_index) ");
-        compile_block_to_c(&loop->body, file);
-      } break;
+      fprintf(file, "\n\nfor (int it_index = ");
+      compile_expression_to_c(loop->from, file);
+      fprintf(file, ", jai_end_index = ");
+      compile_expression_to_c(loop->to, file);
+      fprintf(file,
+        "; it_index < jai_end_index; ++it_index) {\n"
+        "int Jai_it_index = it_index;"
+        );
+      for (int i = 2; i < loop->body.num_statements; ++i) {
+        compile_statement_to_c(loop->body.statements[i], file);
+      }
+      fprintf(file, "\n};\n");
+    } break;
 
-    }
   }
-  fprintf(file, "};\n\n");
+}
+
+static void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
+  fprintf(file, "{");
+  for (int i = 0; i < block->num_statements; ++i) {
+    compile_statement_to_c(block->statements[i], file);
+  }
+  fprintf(file, "\n};\n");
 }
 
 int main(int argc, char const *argv[]) {
@@ -1546,7 +1600,7 @@ int main(int argc, char const *argv[]) {
   {
     DynArray mains = getFunctionDeclarations("main", global_scope);
     if (arrayCount(&mains) == 1) {
-      // TODO: check inparameters of main
+      // TODO: check signature of main
       FILE* header = tmpfile();
       FILE* body = tmpfile();
       FILE* tail = tmpfile();
@@ -1650,31 +1704,8 @@ int main(int argc, char const *argv[]) {
           }
         }
 
+        // TODO: check signature of main
         fprintf(tail, "int main(int argc, const char* argv[]) {\n\t"); print_function_mangle(tail, jai_main); fprintf(tail, "();\n};\n");
-        /*
-        FunctionDeclarationAST* mainf = *((FunctionDeclarationAST**) arrayGet(&mains, 0));
-        fprintf(tail, "int main(int argc, const char* argv[]) {\n");
-        for (int i = 0; i < mainf->body.num_statements; ++i) {
-          StatementAST* stmt = mainf->body.statements[i];
-          switch (stmt->type) {
-            case VARIABLE_DECLARATION_STMT: {
-              VariableDeclarationAST* var = (VariableDeclarationAST*) stmt;
-              fprintf(tail, "%s %s;", var->type->name, var->name);
-              if (var->value) {
-                fprintf(head, "void __jai__initialize_%s(%s\n", var->type->name, var->type->name);
-                fprintf(tail, ";\n");
-              }
-              // TODO: default initialization
-            } break;
-
-            case EXPRESSION_STMT: {
-
-            } break;
-
-            default:;
-          }
-        }
-          */
         arrayFree(&mains);
 
         {

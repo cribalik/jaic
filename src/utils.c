@@ -16,16 +16,11 @@ typedef int bool32;
 
 #define ZERO(ptr) memset(ptr, 0, sizeof(*ptr))
 
-typedef struct {
-  void* data;
-  int size;
-} Array;
-
 // Logging
-#define logErrorAt(filepos, msg, ...) fprintf(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column); found_error = true;
+#define logErrorAt(filepos, msg, ...) fprintf(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column - 1, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column - 1); found_error = true;
 #define logError(msg, ...) fprintf(stderr, "%s(%s:%i): %serror:%s%s " msg, BOLD, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); found_error = true;
 #define logNote(msg, ...) fprintf(stderr, "%s (%s:%i): %snote:%s%s " msg, BOLD, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__);
-#define logNoteAt(filepos, msg, ...) fprintf(stderr, "%s%s:%i:%i (%s:%i): %snote:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column);
+#define logNoteAt(filepos, msg, ...) fprintf(stderr, "%s%s:%i:%i (%s:%i): %snote:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column - 1, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column - 1);
 
 #ifdef DEBUG
 #define logDebugInfo(msg, ...) fprintf(stderr, "%s%s:%i: %sdebug:%s%s " msg, BOLD, __FILE__, __LINE__, GREEN, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__)
