@@ -1,4 +1,5 @@
 # High
+ * add input parameters of function to block scope
  * struct member access
  * arrays
  * loops

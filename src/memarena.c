@@ -58,7 +58,7 @@ static void* arenaPop(MemArena* arena, int size) {
 static void arenaPopTo(MemArena* arena, void* _to) {
   byte* to = (byte*) _to;
   while (1) {
-    if ((*arena)->data <= to && (*arena)->data + (*arena)->size > to) {
+    if ((*arena)->data <= to && (*arena)->data + (*arena)->size >= to) {
       (*arena)->size = to-(*arena)->data;
       return;
     }

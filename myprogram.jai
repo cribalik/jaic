@@ -61,10 +61,25 @@ A := type {
   b: B
 }
 
+Monster := type {
+  gold: int
+  health: int
+  strength: float
+}
+
+print := (a:int) -> int {
+  putchar(a)
+}
+
 main := () {
 
-  loop 0..127 {
-    putchar(it_index);
+  monster: Monster = {gold = 10, health = 20}
+
+  loop 97..110 {
+    print(it_index)
+  }
+  loop 97..110 {
+    print(it+97)
   }
 
 }
