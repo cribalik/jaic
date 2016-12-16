@@ -1,5 +1,8 @@
+#ifndef JAIC_ARENA
+#define JAIC_ARENA
+
 // TODO: alignment!!
-#include "utils.c"
+#include "common.c"
 #include <stddef.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -18,7 +21,7 @@ typedef struct SArenaBlock {
 
 typedef ArenaBlock* MemArena;
 
-void arenaInit(MemArena* arena) {
+static void arenaInit(MemArena* arena) {
   *arena = calloc(1, sizeof(ArenaBlock));
   (*arena)->size = 0;
   (*arena)->prev = 0;
@@ -67,3 +70,12 @@ static void arenaPopTo(MemArena* arena, void* _to) {
     free(tmp);
   }
 }
+
+static char* arenaPushString(MemArena* arena, char* str) {
+  int len = strlen(str) + 1;
+  char* result = arenaPush(arena, len);
+  memcpy(result, str, len);
+  return result;
+}
+
+#endif /* JAIC_ARENA */

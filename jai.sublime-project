@@ -10,7 +10,7 @@
     {
       "name": "jaic",
       "shell_cmd": "gcc -std=c99 -g -Wall -Wextra -DLINUX ${project_path}/src/jaic.c -o ${project_path}/build/jaic",
-      "file_regex": "^([^ ][^:]*):([0-9]+):?([0-9]+)?:? (.*)$",
+      "file_regex": "^([^\\^][^:]+):([0-9]+):?([0-9]+)?:? (.*)$",
       "working_dir": ".",
       "selector": "source.c"
     } ,

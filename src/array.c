@@ -1,3 +1,6 @@
+#ifndef JAIC_ARRAY
+#define JAIC_ARRAY
+
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -35,8 +38,22 @@ static void* arrayPush(DynArray* arr) {
   }
 
   ++arr->count;
-  byte* result = ((byte*) arr->data) + (arr->item_size * (arr->count - 1));
-  return result;
+  return ((byte*) arr->data) + (arr->item_size * (arr->count - 1));
+}
+
+static void* arrayPushN(DynArray* arr, int n) {
+  if (!arr->data) {
+    int size = n > 4 ? n : 4;
+    arr->data = calloc(arr->item_size, size);
+    arr->capacity = size;
+  } else if (arr->count + n >= arr->capacity) {
+    int new_capacity = n > arr->capacity * 2 ? n * 2 : arr->capacity * 2;
+    arr->data = realloc(arr->data, arr->item_size * new_capacity);
+    arr->capacity = new_capacity;
+  }
+
+  arr->count += n;
+  return ((byte*) arr->data) + (arr->item_size * (arr->count - n));
 }
 
 static void arrayPushVal(DynArray* arr, void* in) {
@@ -49,7 +66,11 @@ static void* arrayBegin(DynArray* arr) {
 }
 
 static void* arrayEnd(DynArray* arr) {
-  return arr->data + arr->count * arr->item_size;
+  return arr->data + (arr->count * arr->item_size);
+}
+
+static void* arrayLast(DynArray* arr) {
+  return arr->data + (arr->count - 1) * arr->item_size;
 }
 
 static void* arrayGet(DynArray* arr, int i) {
@@ -59,6 +80,11 @@ static void* arrayGet(DynArray* arr, int i) {
 static void arrayPop(DynArray* arr) {
   assert(arr->count > 0);
   --arr->count;
+}
+
+static void arrayPopN(DynArray* arr, int n) {
+  assert(arr->count >= n);
+  arr->count -= n;
 }
 
 static int arrayCount(DynArray* arr) {
@@ -137,3 +163,5 @@ static void arrayTest() {
 
 }
 #endif
+
+#endif /* JAIC_ARRAY */

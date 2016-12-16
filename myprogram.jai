@@ -1,10 +1,11 @@
+
 // some variables
 var1 := (3+5)+5
 var2 := var1
 var3 : int = 3
 var4 : float = 3.01+5.0
 var5 := fun2(var4, var1)
-myvec2 : vec2
+myvec2: vec2
 mycomp : compound
 var6 := fun3(myvec2, mycomp)
 var7 : vec2 = {x = 3, y = 5}
@@ -61,25 +62,45 @@ A := type {
   b: B
 }
 
+Weapon := type {
+  damage: int
+  durability: int
+}
+
 Monster := type {
   gold: int
   health: int
-  strength: float
+  weapon: Weapon
 }
 
 print := (a:int) -> int {
   putchar(a)
 }
 
+randint := () -> int {
+  // return 3
+}
+
 main := () {
 
-  monster: Monster = {gold = 10, health = 20}
-
-  loop 97..110 {
-    print(it_index)
+  monster: Monster = {
+    gold = randint(),
+    health = 20,
+    weapon = {damage = 3, durability = 10}
   }
-  loop 97..110 {
-    print(it+97)
+
+  // monster.gold = 20
+  // monster = {gold = 20}
+
+  /*
+  loop v,i : array {
+    print(i)
+  }
+  */
+
+  for x,i : 97->110 {
+    print(x)
+    print(i+97)
   }
 
 }
