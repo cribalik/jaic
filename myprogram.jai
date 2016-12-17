@@ -89,8 +89,8 @@ main := () {
     weapon = {damage = 3, durability = 10}
   }
 
-  // monster.gold = 20
-  // monster = {gold = 20}
+  monster.gold = 20
+  monster = {gold = 20}
 
   /*
   loop v,i : array {

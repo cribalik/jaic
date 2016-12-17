@@ -395,6 +395,7 @@ typedef enum ExpressionType {
   INT_EXPR,
   CALL_EXPR,
   VARIABLE_GET_EXPR,
+  MEMBER_ACCESS_EXPR,
   STRUCT_INIT_EXPR,
   BINOP_EXPR,
 } ExpressionType;
@@ -404,6 +405,12 @@ typedef struct ExpressionAST {
   ExpressionType expr_type;
   TypeAST* type;
 } ExpressionAST;
+
+typedef struct MemberAccessAST {
+  ExpressionAST expr;
+  ExpressionAST* base; // in a.x, this is a
+  char* name; // in a.x, this is x
+} MemberAccessAST;
 
 typedef struct MemberInitializationAST {
   char* name;
@@ -697,14 +704,11 @@ static ExpressionAST* parsePrimitive() {
     } break;
 
     case TOK_IDENTIFIER: {
+      ExpressionAST* result;
       byte* start = arenaGetCurrent(perm_arena);
       char* name = arenaPushString(&perm_arena, identifierStr);
       eatToken();
-      // member access?
-      if (token == '.') {
-        eatToken();
-        logErrorAt(prev_pos, "Member access not yet implemented\n");
-      }
+
       // function call?
       if (token == '(') {
 
@@ -753,7 +757,7 @@ static ExpressionAST* parsePrimitive() {
         arrayFree(&args);
 
         logDebugInfo("Found function call to '%s' with %i inputs\n", call->name, call->num_args);
-        return &call->expr;
+        result = &call->expr;
       }
       else {
         VariableGetAST* ast = arenaPush(&perm_arena, sizeof(VariableGetAST));
@@ -761,8 +765,26 @@ static ExpressionAST* parsePrimitive() {
         ast->expr.stmt.pos = pos;
         ast->name = name;
         logDebugInfo("Found a variable get with name '%s'\n", name);
-        return &ast->expr;
+        result = &ast->expr;
       }
+
+      // member access?
+      while (token == '.') {
+        eatToken();
+        if (token == TOK_IDENTIFIER) {
+          MemberAccessAST* ast = arenaPush(&perm_arena, sizeof(MemberAccessAST));
+          ast->expr.expr_type = MEMBER_ACCESS_EXPR;
+          ast->expr.stmt.pos = prev_pos;
+          ast->base = result;
+          ast->name = arenaPushString(&perm_arena, identifierStr);
+          result = &ast->expr;
+          eatToken();
+        } else {
+          logErrorAt(prev_pos, "Identifier expected after '.', instead got %s\n", print_token());
+          return 0;
+        }
+      }
+      return result;
     } break;
 
     case '(': {
@@ -1364,6 +1386,32 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
       expr->type = var->type;
     } break;
 
+    case MEMBER_ACCESS_EXPR: {
+      MemberAccessAST* ast = (MemberAccessAST*) expr;
+      evaluateTypeOfExpression(ast->base, 0, scope);
+      if (ast->base->type) {
+        if (ast->base->type->type == STRUCT) {
+
+          // find member
+          StructAST* str = (StructAST*) ast->base->type;
+          MemberAST* match = 0;
+          for (int i = 0; i < str->num_members; ++i) {
+            MemberAST* member = str->members + i;
+            if (strcmp(member->name, ast->name) == 0) {
+              match = member;
+              break;
+            }
+          }
+
+          if (match) {
+            assert(match->type);
+            ast->expr.type = match->type;
+          } else {logErrorAt(ast->expr.stmt.pos, "struct %s has no member %s\n", ast->base->type->name, ast->name);}
+        } else {logErrorAt(ast->base->stmt.pos, "Can only access members of structs, %s is not a struct\n", ast->base->type->name);}
+      }
+    } break;
+
+
     case STRUCT_INIT_EXPR: {
       StructInitializationAST* ast = (StructInitializationAST*) expr;
       if (evidence) {
@@ -1561,6 +1609,12 @@ static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
       fprintf(body, "jai_%s", var->name);
     } break;
 
+    case MEMBER_ACCESS_EXPR: {
+      MemberAccessAST* ast = (MemberAccessAST*) expr;
+      compile_expression_to_c(ast->base, body);
+      fprintf(body, ".%s", ast->name);
+    } break;
+
     case CALL_EXPR: {
       CallAST* call = (CallAST*) expr;
       if (call->fun->is_foreign) {
@@ -1586,6 +1640,10 @@ static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
       compile_expression_to_c(bin->rhs, body);
       fprintf(body, ")");
     } break;
+
+    case STRUCT_INIT_EXPR: {
+      logDebugError("Cannot directly compile a struct initialization\n");
+    } break;
   }
 }
 
@@ -1602,6 +1660,20 @@ static void compile_struct_init_to_c(String name, StructInitializationAST* init,
       fprintf(file, ";");
     }
     stringPop(&name, len+1);
+  }
+}
+
+static void get_expression_string(ExpressionAST* expr, String* s) {
+  if (expr->expr_type == MEMBER_ACCESS_EXPR) {
+    MemberAccessAST* ast = (MemberAccessAST*) expr;
+    get_expression_string(ast->base, s);
+    stringAppendChar(s, '.');
+    stringAppend(s, ast->name);
+  } else if (expr->expr_type == VARIABLE_GET_EXPR) {
+    stringAppend(s, "jai_");
+    stringAppend(s, ((VariableGetAST*)expr)->name);
+  } else {
+    logErrorAt(expr->stmt.pos, "Unsupported member access base type\n");
   }
 }
 
@@ -1682,25 +1754,24 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       AssignmentAST* ass = (AssignmentAST*) stmt;
       fprintf(file, "\n");
 
-      // struct?
-      switch (ass->lhs->expr_type) {
-
-        case VARIABLE_GET_EXPR: {
-          VariableGetAST* var = (VariableGetAST*) ass->lhs;
-          if (ass->lhs->type->type == STRUCT) {
-            logErrorAt(ass->stmt.pos, "Assignment to structs is not yet implemented\n");
-          }
-          else {
-            fprintf(file, "jai_%s = ", var->name);
-            compile_expression_to_c(ass->rhs, file);
-            fprintf(file, ";");
-          }
-        } break;
-
-        default: { 
-          // TODO: pretty-print expression types
-          logErrorAt(ass->stmt.pos, "Assignment to expression of type %i is not allowed\n", ass->lhs->expr_type);
-        } break;
+      if (ass->lhs->expr_type == VARIABLE_GET_EXPR || ass->lhs->expr_type == MEMBER_ACCESS_EXPR) {
+        if (ass->rhs->expr_type == STRUCT_INIT_EXPR) {
+          StructInitializationAST* init = (StructInitializationAST*) ass->rhs;
+          // compile_expression_to_c(ass->lhs, file);
+          String name;
+          stringInit(&name, 0);
+          get_expression_string(ass->lhs, &name);
+          fprintf(file, "\nmemset(&%s, 0, sizeof(%s));", stringGet(&name), stringGet(&name));
+          compile_struct_init_to_c(name, init, file);
+        } else {
+          compile_expression_to_c(ass->lhs, file);
+          fprintf(file, " = ");
+          compile_expression_to_c(ass->rhs, file);
+          fprintf(file, ";");
+        }
+      } else {
+        // TODO: pretty-print expression types
+        logErrorAt(ass->stmt.pos, "Assignment to expression of type %i is not allowed\n", ass->lhs->expr_type);
       }
     } break;
 

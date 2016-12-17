@@ -1,8 +1,6 @@
 # High
- * struct initializer in assignment
  * return statements
  * add input parameters of function to block scope
- * struct member access
  * arrays
  * loops with arrays
  * pointers
