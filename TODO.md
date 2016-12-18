@@ -7,6 +7,8 @@
  * Type identifier for struct initializer
  * Multiple return values
  * (strongly and loosly typed) enums and (auto-breaking! :D) switch statement
+ * default function parameters
+ * UFC
 
 # Low
  * check if all code paths have return statements
