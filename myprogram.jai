@@ -19,7 +19,10 @@ fun1 := (a:int, b:float, c:int) -> int {/*this is a function body*/ }
 fun2 := (a:float, b:int) -> int {/*this is a function body*/}
 fun3 := (a:vec2, b:compound) -> vec2 { fun2(0.1, 3); }
 fun4 := () {}
+
+// some foreign (C) functions
 putchar := (a:int) -> int #foreign
+rand := () -> int #foreign
 
 // function overloading is OK
 overfun := (a: vec2) {};
@@ -28,7 +31,7 @@ overfun := (a: int, b: float) {};
 result := overfun(1, 1.0);
 
 some_identifier := 3;
-// some_identifier := {a:int;}; // identifiers must be unique, this will error
+// some_identifier := type {a:int}; // identifiers must be unique, this should error
 
 // some structs
 compound := type {
@@ -77,20 +80,25 @@ print := (a:int) -> int {
   putchar(a)
 }
 
-randint := () -> int {
-  // return 3
+newRichMonster := () -> Monster {
+  some_gold := 300
+  more_gold := 300 + 1700
+  return {gold = some_gold + more_gold}
 }
 
 main := () {
 
   monster: Monster = {
-    gold = randint(),
+    gold = rand(),
     health = 20,
     weapon = {damage = 3, durability = 10}
   }
 
   monster.gold = 20
   monster = {gold = 20}
+
+  // this should be allowed for pointer type but not for scalar type
+  // newMonster().gold = 20 
 
   /*
   loop v,i : array {
@@ -101,6 +109,7 @@ main := () {
   for x,i : 97->110 {
     print(x)
     print(i+97)
+    print(97+rand())
   }
 
 }

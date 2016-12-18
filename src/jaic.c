@@ -25,6 +25,7 @@ typedef enum {
   TOK_STRUCT = -8,
   TOK_LOOP = -9,
   TOK_DOUBLEDOT = -10,
+  TOK_RETURN = -11,
 } Token;
 
 /* values set by the tokenizer */
@@ -174,6 +175,8 @@ static int gettok() {
         return TOK_LOOP;
       } else if (strcmp(identifierStr, "for") == 0) {
         return TOK_LOOP;
+      } else if (strcmp(identifierStr, "return") == 0) {
+        return TOK_RETURN;
       } else {
         return TOK_IDENTIFIER;
       }
@@ -328,6 +331,7 @@ typedef enum StatementType {
   EXPRESSION_STMT,
   COMPOUND_STMT, // new scope
   LOOP_STMT,
+  RETURN_STMT,
 } StatementType;
 
 typedef struct StatementAST {
@@ -342,6 +346,11 @@ typedef struct CompoundStatementAST {
   StatementAST** statements;
   // TODO: optimize variable lookups
 } CompoundStatementAST;
+
+typedef struct ReturnAST {
+  StatementAST stmt;
+  ExpressionAST* value;
+} ReturnAST;
 
 /* Type */
 
@@ -385,7 +394,7 @@ typedef struct StructAST {
   TypeAST type;
   int num_members;
   MemberAST* members;
-  bool has_initial_values;
+  bool has_initializer;
 } StructAST;
 
 /* Expressions */
@@ -940,6 +949,17 @@ static StatementAST* _parseStatement() {
       } else {logErrorAt(prev_pos, "Expected ':'\n");}
     } else {logErrorAt(prev_pos, "Expected a name for element in list.. For example 'for x : list {...}'\n");}
     return 0;
+  }
+
+  else if (token == TOK_RETURN) {
+    eatToken();
+    ReturnAST* ast = arenaPush(&perm_arena, sizeof(ReturnAST));
+    ast->stmt.type = RETURN_STMT;
+    ast->stmt.pos = prev_pos;
+    ast->value = parseExpression();
+    if (ast->value) {
+      return &ast->stmt;
+    } else {logErrorAt(ast->stmt.pos, "Failed to parse return statement\n");}
   }
 
   else {
@@ -1526,10 +1546,6 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
         doTypeInferenceForScope(&loop->body);
       } break;
 
-      case UNKNOWN_STMT: {
-        logDebugError("Unknown statement\n");
-      } break;
-
       case ASSIGNMENT_STMT: {
         AssignmentAST* ass = (AssignmentAST*) stmt;
         evaluateTypeOfExpression(ass->lhs, 0, scope);
@@ -1543,6 +1559,31 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
         else if (ass->lhs->type != ass->rhs->type) {
           logErrorAt(stmt->pos, "Left hand side and right hand side of assignment do not have same types!\n");
         }
+      } break;
+
+      case RETURN_STMT: {
+        ReturnAST* ret = (ReturnAST*) stmt;
+        CompoundStatementAST* scp = scope;
+        while (scp) {
+          if (scp->stmt.type == FUNCTION_DECLARATION_STMT) {
+            break;
+          }
+          scp = scp->parent_scope;
+        }
+
+        if (scp) {
+          FunctionDeclarationAST* fun = (FunctionDeclarationAST*) scp;
+          evaluateTypeOfExpression(ret->value, fun->return_type, scope);
+          if (ret->value->type) {
+            if (ret->value->type != fun->return_type) {
+              logErrorAt(ret->stmt.pos, "Return type %s does not match function return type %s\n", ret->value->type->name, fun->return_type->name);
+            }
+          } else {logErrorAt(ret->stmt.pos, "Could not infer type of return value\n")};
+        } else {logErrorAt(ret->stmt.pos, "Can only use return inside function\n");}
+      } break;
+
+      case UNKNOWN_STMT: {
+        logDebugError("Unknown statement\n");
       } break;
 
     }
@@ -1579,15 +1620,15 @@ static void compile_type_to_c(FILE* header, FILE* body, StructAST* str, DynArray
   logDebugInfo("Compiling struct %s to C\n", str->type.name);
 
   /* Compile struct definition */
-  fprintf(header, "typedef struct Jai_%s Jai_%s;\n", str->type.name, str->type.name);
-  fprintf(body, "typedef struct Jai_%s {\n", str->type.name);
+  fprintf(header, "typedef struct T_%s T_%s;\n", str->type.name, str->type.name);
+  fprintf(body, "typedef struct T_%s {\n", str->type.name);
   for (int i = 0; i < str->num_members; ++i) {
     MemberAST* member = str->members + i;
-    fprintf(body, "\tJai_%s %s;\n", member->type->name, member->name);
+    fprintf(body, "\tT_%s %s;\n", member->type->name, member->name);
   }
-  fprintf(body, "} Jai_%s;\n\n", str->type.name);
+  fprintf(body, "} T_%s;\n\n", str->type.name);
   /* TODO: check for default values */
-  if (str->has_initial_values) {
+  if (str->has_initializer) {
     UNIMPLEMENTED;
   }
 }
@@ -1606,7 +1647,7 @@ static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
 
     case VARIABLE_GET_EXPR: {
       VariableGetAST* var = (VariableGetAST*) expr;
-      fprintf(body, "jai_%s", var->name);
+      fprintf(body, "v_%s", var->name);
     } break;
 
     case MEMBER_ACCESS_EXPR: {
@@ -1642,7 +1683,7 @@ static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
     } break;
 
     case STRUCT_INIT_EXPR: {
-      logDebugError("Cannot directly compile a struct initialization\n");
+      logErrorAt(expr->stmt.pos, "<internal>: Cannot directly compile a struct initialization\n");
     } break;
   }
 }
@@ -1670,7 +1711,7 @@ static void get_expression_string(ExpressionAST* expr, String* s) {
     stringAppendChar(s, '.');
     stringAppend(s, ast->name);
   } else if (expr->expr_type == VARIABLE_GET_EXPR) {
-    stringAppend(s, "jai_");
+    stringAppend(s, "v_");
     stringAppend(s, ((VariableGetAST*)expr)->name);
   } else {
     logErrorAt(expr->stmt.pos, "Unsupported member access base type\n");
@@ -1691,7 +1732,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       LoopAST* loop = (LoopAST*) stmt;
       // TODO: use size_t instead
       if (loop->iterator_name) {
-        fprintf(file, "\nfor (int jai_%s = ", loop->iterator_name);
+        fprintf(file, "\nfor (int v_%s = ", loop->iterator_name);
       } else {
         fprintf(file, "\nfor (int it_index = ");
       }
@@ -1699,18 +1740,18 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       fprintf(file, ", end_index = ");
       compile_expression_to_c(loop->to, file);
       if (loop->index_name) {
-        fprintf(file, ", jai_%s = 0", loop->index_name);
+        fprintf(file, ", v_%s = 0", loop->index_name);
       }
       if (loop->iterator_name) {
         fprintf(file,
-          "; jai_%s < end_index; ++jai_%s"
+          "; v_%s < end_index; ++v_%s"
         , loop->iterator_name, loop->iterator_name);
       } else {
         fprintf(file,
           "; it_index < end_index; ++it_index");
       }
       if (loop->index_name) {
-        fprintf(file, ", ++jai_%s", loop->index_name);
+        fprintf(file, ", ++v_%s", loop->index_name);
       }
       fprintf(file, ") {");
       for (int i = 0; i < loop->body.num_statements; ++i) {
@@ -1727,13 +1768,13 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       if (var->type->type == STRUCT) {
         StructInitializationAST* init = (StructInitializationAST*) var->value;
         StructAST* str = (StructAST*) var->type;
-        fprintf(file, "Jai_%s jai_%s = {0};", var->type->name, var->name);
-        if (str->has_initial_values) {
+        fprintf(file, "T_%s v_%s = {0};", var->type->name, var->name);
+        if (str->has_initializer) {
           UNIMPLEMENTED;
         }
         if (var->value) {
           String name;
-          stringInit(&name, "jai_");
+          stringInit(&name, "v_");
           stringAppend(&name, var->name);
           compile_struct_init_to_c(name, init, file);
           stringFree(&name);
@@ -1741,7 +1782,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       }
       // builtin
       else {
-        fprintf(file, "Jai_%s jai_%s", var->type->name, var->name);
+        fprintf(file, "T_%s v_%s", var->type->name, var->name);
         if (var->value) {
           fprintf(file, " = ");
           compile_expression_to_c(var->value, file);
@@ -1772,6 +1813,26 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       } else {
         // TODO: pretty-print expression types
         logErrorAt(ass->stmt.pos, "Assignment to expression of type %i is not allowed\n", ass->lhs->expr_type);
+      }
+    } break;
+
+    case RETURN_STMT: {
+      ReturnAST* ret = (ReturnAST*) stmt;
+      if (ret->value->expr_type == STRUCT_INIT_EXPR) {
+        StructInitializationAST* init = (StructInitializationAST*) ret->value;
+        StructAST* str = (StructAST*) init->expr.type;
+        fprintf(file, "\n{\nT_%s __returnval = {0};", ret->value->type->name);
+        if (str->has_initializer) {
+          UNIMPLEMENTED;
+        }
+        String name;
+        stringInit(&name, "__returnval");
+        compile_struct_init_to_c(name, init, file);
+        fprintf(file, "\nreturn __returnval;\n}");
+      } else {
+        fprintf(file, "\nreturn ");
+        compile_expression_to_c(ret->value, file);
+        fprintf(file, ";");
       }
     } break;
 
@@ -1891,19 +1952,19 @@ int main(int argc, char const *argv[]) {
         // TODO: make to work on all systems
         fprintf(header,
           "#include <stddef.h>\n\n"
-          "typedef char Jai_i8;\n"
-          "typedef unsigned char Jai_u8;\n"
-          "typedef short Jai_i16;\n"
-          "typedef unsigned short Jai_u16;\n"
-          "typedef int Jai_i32;\n"
-          "typedef unsigned int Jai_u32;\n"
-          "typedef long long Jai_i64;\n"
-          "typedef unsigned long long Jai_u64;\n"
-          "typedef float Jai_f32;\n"
-          "typedef double Jai_f64;\n"
-          "typedef float Jai_float;\n"
-          "typedef int Jai_int;\n"
-          "typedef void Jai_void;\n\n"
+          "typedef char T_i8;\n"
+          "typedef unsigned char T_u8;\n"
+          "typedef short T_i16;\n"
+          "typedef unsigned short T_u16;\n"
+          "typedef int T_i32;\n"
+          "typedef unsigned int T_u32;\n"
+          "typedef long long T_i64;\n"
+          "typedef unsigned long long T_u64;\n"
+          "typedef float T_f32;\n"
+          "typedef double T_f64;\n"
+          "typedef float T_float;\n"
+          "typedef int T_int;\n"
+          "typedef void T_void;\n\n"
           "void* memset( void* dest, int ch, size_t count );\n\n"
         );
 
@@ -1951,7 +2012,7 @@ int main(int argc, char const *argv[]) {
                 fprintf(header, "(");
                 for (int i = 0; i < fun->num_args; ++i) {
                   ArgumentAST* arg = fun->args + i;
-                  fprintf(header, "Jai_%s jai_%s", arg->type->name, arg->name);
+                  fprintf(header, "T_%s v_%s", arg->type->name, arg->name);
                   if (i != fun->num_args - 1) {
                     fprintf(header, ", ");
                   }
@@ -1961,8 +2022,8 @@ int main(int argc, char const *argv[]) {
 
               else {
 
-                fprintf(header, "Jai_%s ", fun->return_type->name);
-                fprintf(body, "Jai_%s ", fun->return_type->name);
+                fprintf(header, "T_%s ", fun->return_type->name);
+                fprintf(body, "T_%s ", fun->return_type->name);
 
                 print_function_mangle(header, fun);
                 print_function_mangle(body, fun);
@@ -1971,8 +2032,8 @@ int main(int argc, char const *argv[]) {
                 fprintf(body, "(");
                 for (int i = 0; i < fun->num_args; ++i) {
                   ArgumentAST* arg = fun->args + i;
-                  fprintf(header, "Jai_%s jai_%s", arg->type_name, arg->name);
-                  fprintf(body, "Jai_%s jai_%s", arg->type_name, arg->name);
+                  fprintf(header, "T_%s v_%s", arg->type_name, arg->name);
+                  fprintf(body, "T_%s v_%s", arg->type_name, arg->name);
                   if (i != fun->num_args - 1) {
                     fprintf(header, ", ");
                     fprintf(body, ", ");
