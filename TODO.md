@@ -20,6 +20,7 @@
     2. you get automatic conversion to the parent type: `offsetPosition(player, x=1)`
     3. if you know a pointer to a type is really a pointer to the subtype, you can safely cast it to the subtype: `player := cast(pos, Player)`
     4. your subtype has the same member functions as the parent: `player.offset(x=1)`
+    
   Basically, all of these features come down to implicit casting to parent type in different situations (even in point 4, since we don't have members functions but use UFC instead). If you want these features, why not have a member of this type, and annotate it to allow implicit casting with a keyword like C++ `using`?
   This makes it a lot easier to see what the type is made of, especially if we have multiple members of the same type
   ```
