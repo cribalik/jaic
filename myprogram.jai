@@ -100,12 +100,6 @@ main := () {
   // newRichMonster().gold = -3
   monster = newRichMonster()
 
-  /*
-  loop v,i : array {
-    putchar(i)
-  }
-  */
-
   for x,i : 97->110 {
     putchar(x)
     putchar(i+97)

@@ -340,9 +340,9 @@ typedef struct ReturnAST {
   ExpressionAST* value;
 } ReturnAST;
 
-/* Type */
+/* TypeClass */
 
-typedef enum Type {
+typedef enum TypeClass {
   UNKNOWN_TYPE,
   /* builtin types */
   VOID_TYPE,
@@ -369,60 +369,68 @@ typedef enum Type {
   ARRAY_TYPE,
 
   FUNCTION_TYPE
+} TypeClass;
+
+typedef struct Type {
+  TypeClass class;
 } Type;
 
-typedef struct TypeAST {
-  StatementAST stmt;
-  char* name;
-  Type type;
-  FilePos pos;
-} TypeAST;
-
-global TypeAST builtin_types[] = {
+global Type builtin_types[] = {
   {},
-  {.type = VOID_TYPE, .name = "void"},
-  {.type = INT_TYPE, .name = "int"},
-  {.type = FLOAT_TYPE, .name = "float"},
+  {.class = VOID_TYPE},
+  {.class = INT_TYPE},
+  {.class = FLOAT_TYPE},
 
-  {.type = F32_TYPE, .name = "f32"},
-  {.type = F64_TYPE, .name = "f64"},
+  {.class = F32_TYPE},
+  {.class = F64_TYPE},
 
-  {.type = U8_TYPE, .name = "u8"},
-  {.type = U16_TYPE, .name = "u16"},
-  {.type = U32_TYPE, .name = "u32"},
-  {.type = U64_TYPE, .name = "u64"},
+  {.class = U8_TYPE},
+  {.class = U16_TYPE},
+  {.class = U32_TYPE},
+  {.class = U64_TYPE},
 
-  {.type = I8_TYPE, .name = "i8"},
-  {.type = I16_TYPE, .name = "i16"},
-  {.type = I32_TYPE, .name = "i32"},
-  {.type = I64_TYPE, .name = "i64"},
+  {.class = I8_TYPE},
+  {.class = I16_TYPE},
+  {.class = I32_TYPE},
+  {.class = I64_TYPE},
 
-  {.type = PINT_TYPE, .name = "pint"},
+  {.class = PINT_TYPE},
 
 };
 
 /* some dummy types, like telling evaluateTypeOfExpression that we want an array, but don't know the type of the elements */
-global TypeAST array_no_internal_type = {.type = ARRAY_TYPE, .name = "<array_dummy_type>"};
+global Type array_no_internal_type = {.class = ARRAY_TYPE};
 
 global DynArray array_types;
 
 typedef struct MemberAST {
   char* name;
   char* type_name;
-  TypeAST* type;
+  Type* type;
   FilePos pos;
 } MemberAST;
-typedef struct StructAST {
-  TypeAST type;
+typedef struct StructType {
+  Type type;
+  char* name;
   int num_members;
   MemberAST* members;
   bool has_initializer;
-} StructAST;
+} StructType;
+
+typedef struct StructDeclarationAST {
+  StatementAST stmt;
+  StructType* type;
+} StructDeclarationAST;
 
 typedef struct ArrayType {
-  TypeAST type;
-  TypeAST* base_type;
+  Type type;
+  Type* base_type;
 } ArrayType;
+
+typedef struct StaticArrayType {
+  ArrayType arr;
+  int size;
+} StaticArrayType;
 
 /* Expressions */
 
@@ -439,7 +447,7 @@ typedef enum ExpressionType {
 typedef struct ExpressionAST {
   StatementAST stmt;
   ExpressionType expr_type;
-  TypeAST* type;
+  Type* type;
 } ExpressionAST;
 
 typedef struct MemberAccessAST {
@@ -447,6 +455,13 @@ typedef struct MemberAccessAST {
   ExpressionAST* base; // in a.x, this is a
   char* name; // in a.x, this is x
 } MemberAccessAST;
+
+typedef struct TypeAST {
+  char* nam;
+  int num_pointer;
+  int num_array;
+  ExpressionAST* size;
+} TypeAST;
 
 typedef struct MemberInitializationAST {
   char* name;
@@ -493,8 +508,8 @@ typedef struct BinaryExpressionAST {
 typedef struct VariableDeclarationAST {
   StatementAST stmt;
   char* name;
-  char* type_name;
-  TypeAST* type;
+  TypeAST type_ast;
+  Type* type;
   ExpressionAST* value;
 } VariableDeclarationAST;
 
@@ -515,7 +530,7 @@ typedef struct FunctionDeclarationAST {
   int num_args;
   ArgumentAST* args;
   char* return_type_name;
-  TypeAST* return_type;
+  Type* return_type;
   FilePos pos;
   bool is_foreign;
 } FunctionDeclarationAST;
@@ -525,6 +540,11 @@ typedef struct AssignmentAST {
   ExpressionAST* lhs;
   ExpressionAST* rhs;
 } AssignmentAST;
+
+static char* print_type_name(TypeAST type) {
+  (void) type;
+  UNIMPLEMENTED;
+}
 
 static int test() {
   arrayTest();
@@ -542,6 +562,7 @@ typedef enum IdentifierType {
 /** 1st pass: Parsing **/
 
 static StatementAST* parseStatement();
+static TypeAST parseType();
 
 static int parseBlock(CompoundStatementAST* result, DynArray* prefix) {
   if (token != '{') {
@@ -625,17 +646,19 @@ static FunctionDeclarationAST* parseFunctionDeclaration(char* name, bool try) {
     }
     eatToken();
 
-    if (token != TOK_IDENTIFIER) {
+    TypeAST type = parseType();
+
+    if (!type.nam) {
       if (!try) {
-        logErrorAt(prev_pos, "Typename expected after ':'\n");
+        logErrorAt(prev_pos, "Type expected after ':'\n");
       }
       arrayFree(&args);
       return 0;
     }
 
-    arg->type_name = arenaPushString(&perm_arena, identifierStr);
+    arg->type_ast = type;
     eatToken();
-    logDebugInfo(" - with type %s\n", arg->type_name);
+    logDebugInfo(" - with type %s\n", print_type_name(arg->type_ast));
 
     // TODO: default parameters
 
@@ -927,12 +950,13 @@ static ExpressionAST* parseExpression() {
   return expr;
 }
 
-char* parseType() {
+static TypeAST parseType() {
+  TypeAST result = {0};
   void* start = arenaGetCurrent(perm_arena);
 
   bool partial_success = false;
 
-  while (token == '[') {
+  if (token == '[') {
     eatToken();
     partial_success = true;
     *(char*)arenaPush(&perm_arena, 1) = '[';
@@ -940,9 +964,13 @@ char* parseType() {
       eatToken();
       *(char*)arenaPush(&perm_arena, 1) = ']';
     } else {
+      ExpressionAST* expr = parseExpression();
+      if (expr) {
+
+      }
       logErrorAt(prev_pos, "Expected ']' after '['\n");
       arenaPopTo(&perm_arena, start);
-      return 0;
+      return result;
     }
   }
 
@@ -954,10 +982,12 @@ char* parseType() {
       logErrorAt(prev_pos, "Expected type name\n");
     }
     arenaPopTo(&perm_arena, start);
-    return 0;
+    return result;
   }
 
-  return start;
+  result.nam = start;
+
+  return result;
 }
 
 static StatementAST* _parseStatement() {
@@ -1048,16 +1078,16 @@ static StatementAST* _parseStatement() {
         VariableGetAST* lhs = (VariableGetAST*) expr;
         eatToken();
 
-        char* typename = parseType();
+        TypeAST type_ast = parseType();
 
-        if (typename) {
-          logDebugInfo("With declared type %s\n", typename);
+        if (type_ast.nam) {
+          logDebugInfo("With declared type %s\n", print_type_name(type_ast));
           if (token != '=') {
             VariableDeclarationAST* var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
             var->stmt.type = VARIABLE_DECLARATION_STMT;
             var->name = lhs->name;
-            var->type_name = typename;
-            logDebugInfo("Found a variable declaration for %s with type %s and no value\n", var->name, var->type_name);
+            var->type_ast = type_ast;
+            logDebugInfo("Found a variable declaration for %s with type %s and no value\n", var->name, print_type_name(var->type_ast));
             // TODO: default initialization of variable here!
             return &var->stmt;
           }
@@ -1075,11 +1105,12 @@ static StatementAST* _parseStatement() {
             if (token == '{') {
               eatToken();
 
-              StructAST* str = arenaPush(&perm_arena, sizeof(StructAST));
-              str->type.stmt.type = STRUCT_DECLARATION_STMT;
-              str->type.pos = pos_of_identifier;
-              str->type.type = STRUCT_TYPE;
-              str->type.name = lhs->name;
+              StructDeclarationAST* decl = arenaPush(&perm_arena, sizeof(StructDeclarationAST));
+              StructType* str = arenaPush(&perm_arena, sizeof(StructType));
+              decl->stmt.type = STRUCT_DECLARATION_STMT;
+              decl->stmt.pos = pos_of_identifier;
+              str->type.class = STRUCT_TYPE;
+              str->name = lhs->name;
               DynArray members; /* MemberAST */
               arrayInit(&members, 4, sizeof(MemberAST));
               bool success = false;
@@ -1113,11 +1144,11 @@ static StatementAST* _parseStatement() {
               }
 
               if (success) {
-                if (!typename) {
+                if (!type_ast.nam) {
                   str->num_members = arrayCount(&members);
                   str->members = pushArrayToArena(&members, &perm_arena);
                   arrayFree(&members);
-                  return &str->type.stmt;
+                  return &decl->stmt;
                 } else { logErrorAt(prev_pos, "You should not define a type of a type declaration (drop the type after ':')\n"); }
               }
             } else {
@@ -1133,7 +1164,7 @@ static StatementAST* _parseStatement() {
             if (fun) {
               fun->pos = pos_of_identifier;
               logDebugInfoAt(pos_of_identifier, "Function declaration for '%s' found\n", fun->name);
-              if (!typename) {
+              if (!type_ast.nam) {
                 logDebugInfo("Found a function definition with name %s, and %i arguments\n", fun->name, fun->num_args);
                 return &fun->body.stmt;
               } else {
@@ -1153,10 +1184,10 @@ static StatementAST* _parseStatement() {
               var->stmt.type = VARIABLE_DECLARATION_STMT;
               var->stmt.pos = pos_of_identifier;
               var->name = lhs->name;
-              var->type_name = typename;
+              var->type_ast = type_ast;
               var->value = value;
               var->type = 0;
-              logDebugInfo("Found a variable declaration for %s with type %s and a value of type %i\n", var->name, var->type_name, var->value->expr_type);
+              logDebugInfo("Found a variable declaration for %s with type %s and a value of type %i\n", var->name, print_type_name(var->type_ast), var->value->expr_type);
               return &var->stmt;
             }
           }
@@ -1221,9 +1252,10 @@ static StatementAST* parseStatement() {
 
 /** 2nd pass: type inference and scope checks **/
 
-static void evaluateTypeOfStruct(StructAST* str, CompoundStatementAST* scope);
+static void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope);
 
-static TypeAST* getTypeDeclaration(char* name, CompoundStatementAST* scope) {
+static Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope) {
+  char* name = type_ast.nam;
   // builtin?
   for (int i = 1; i < ARRSIZE(builtin_types); ++i) {
     if (strcmp(builtin_types[i].name, name) == 0) {
@@ -1232,7 +1264,7 @@ static TypeAST* getTypeDeclaration(char* name, CompoundStatementAST* scope) {
   }
 
   // check for array types
-  if (name[0] == '[' && name[1] == ']') {
+  if (type_ast.num_array > 0) {
     ArrayType* result = 0;
     for (ArrayType *it = arrayBegin(&array_types), *end = arrayEnd(&array_types); it < end; ++it) {
       if (strcmp(it->type.name, name) == 0) {
@@ -1259,7 +1291,7 @@ static TypeAST* getTypeDeclaration(char* name, CompoundStatementAST* scope) {
     for (int i = 0; i < scope->num_statements; ++i) {
       StatementAST* stmt = scope->statements[i];
       if (stmt->type == STRUCT_DECLARATION_STMT) {
-        StructAST* str = (StructAST*) stmt;
+        StructType* str = (StructType*) stmt;
         if (strcmp(str->type.name, name) == 0) {
           evaluateTypeOfStruct(str, scope);
           return &str->type;
@@ -1292,9 +1324,10 @@ static DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope)
 
 static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope);
 
-static VariableDeclarationAST it_index_declaration = {
+static TypeAST _int_type_ast = {.nam = "int"};
+static VariableDeclarationAST _it_index_declaration = {
   .name = "it_index",
-  .type_name = "int",
+  .type_ast = &_int_type_ast,
   .type = &builtin_types[INT_TYPE]
 };
 static VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatementAST* scope) {
@@ -1303,7 +1336,7 @@ static VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatem
     if (scope->stmt.type == LOOP_STMT) {
       LoopAST* loop = (LoopAST*) scope;
       if (loop->iterator_name && strcmp(name, loop->iterator_name) == 0) {
-        return &it_index_declaration;
+        return &_it_index_declaration;
       } else if (loop->index_name && strcmp(name, loop->index_name) == 0) {
         return &loop->it;
       }
@@ -1335,7 +1368,7 @@ static VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatem
   return 0;
 }
 
-static void _evaluateTypeOfStruct(StructAST* str, DynArray* parents, CompoundStatementAST* scope) {
+static void _evaluateTypeOfStruct(StructType* str, DynArray* parents, CompoundStatementAST* scope) {
   for (int i = 0; i < str->num_members; ++i) {
     if (!str->members[i].type) {
       str->members[i].type = getTypeDeclaration(str->members[i].type_name, scope);
@@ -1346,18 +1379,18 @@ static void _evaluateTypeOfStruct(StructAST* str, DynArray* parents, CompoundSta
       if (str->members[i].type->type == STRUCT_TYPE) {
         for (char **parent = arrayBegin(parents), **end = arrayEnd(parents); parent != end; ++parent) {
           if (strcmp(*parent, str->members[i].type->name) == 0) {
-            logErrorAt(str->members[i].pos, "Type %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
+            logErrorAt(str->members[i].pos, "TypeClass %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
             exit(1);
           }
         }
         arrayPushVal(parents, &str->members[i].type->name);
-        _evaluateTypeOfStruct((StructAST*) str->members[i].type, parents, scope);
+        _evaluateTypeOfStruct((StructType*) str->members[i].type, parents, scope);
         arrayPop(parents);
       }
     }
   }
 }
-static void evaluateTypeOfStruct(StructAST* str, CompoundStatementAST* scope) {
+static void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope) {
   DynArray parents;
   arrayInit(&parents, 1, sizeof(char*));
   arrayPushVal(&parents, &str->type.name);
@@ -1365,16 +1398,16 @@ static void evaluateTypeOfStruct(StructAST* str, CompoundStatementAST* scope) {
   arrayFree(&parents);
 }
 
-static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, CompoundStatementAST* scope);
+static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope);
 static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope) {
   if (!var || var->type) {
     return;
   }
 
-  TypeAST* declared_type = 0;
+  Type* declared_type = 0;
 
-  if (var->type_name) {
-    declared_type = getTypeDeclaration(var->type_name, scope);
+  if (var->type_ast) {
+    declared_type = getTypeDeclaration(var->type_ast, scope);
     if (!declared_type) {
       logErrorAt(var->stmt.pos, "Declared type '%s' for '%s' doesn't exist\n", var->type_name, var->name);
       var->type = 0;
@@ -1423,7 +1456,7 @@ static void evaluateTypeOfFunction(FunctionDeclarationAST* fun, CompoundStatemen
   }
 }
 
-static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, CompoundStatementAST* scope) {
+static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope) {
   if (expr->type) {
     return;
   }
@@ -1513,7 +1546,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
         if (ast->base->type->type == STRUCT_TYPE) {
 
           // find member
-          StructAST* str = (StructAST*) ast->base->type;
+          StructType* str = (StructType*) ast->base->type;
           MemberAST* match = 0;
           for (int i = 0; i < str->num_members; ++i) {
             MemberAST* member = str->members + i;
@@ -1546,7 +1579,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
       StructInitializationAST* ast = (StructInitializationAST*) expr;
       if (evidence) {
         if (evidence->type == STRUCT_TYPE) {
-          StructAST* target = (StructAST*) evidence;
+          StructType* target = (StructType*) evidence;
           bool all_match = true;
           for (int i = 0; i < ast->num_members; ++i) {
             // TODO: make sure each member is only mentioned once
@@ -1585,7 +1618,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
       if (ast->lhs->type == ast->rhs->type) {
         ast->expr.type = ast->lhs->type;
       } else {
-        logErrorAt(ast->lhs->stmt.pos, "Type of left hand side '%s' does not match type of right hand side '%s'\n", ast->lhs->type->name, ast->rhs->type->name);
+        logErrorAt(ast->lhs->stmt.pos, "TypeClass of left hand side '%s' does not match type of right hand side '%s'\n", ast->lhs->type->name, ast->rhs->type->name);
       }
     } break;
   }
@@ -1612,7 +1645,7 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
     switch (stmt->type) {
 
       case STRUCT_DECLARATION_STMT: {
-        StructAST* str = (StructAST*) stmt;
+        StructType* str = (StructType*) stmt;
         evaluateTypeOfStruct(str, scope);
         logDebugInfo("Evaluated type of struct '%s'\n", str->type.name);
       } break;
@@ -1732,16 +1765,16 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
 static void print_function_mangle(FILE* file, FunctionDeclarationAST* fun) {
   fprintf(file, "%s_%i", fun->name, fun->id);
 }
-static void compile_type_to_c(FILE* header, FILE* body, StructAST* str, DynArray* done) {
+static void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArray* done) {
   arrayPushVal(done, &str);
 
   // check if we need to compile the members types first
   for (int i = 0; i < str->num_members; ++i) {
     MemberAST* member = str->members + i;
     if (member->type->type == STRUCT_TYPE) {
-      StructAST* membertype = (StructAST*) member->type;
+      StructType* membertype = (StructType*) member->type;
       bool has_been_compiled = false;
-      for (StructAST** s = arrayBegin(done), **end = arrayEnd(done); s != end; ++s) {
+      for (StructType** s = arrayBegin(done), **end = arrayEnd(done); s != end; ++s) {
         if (*s == membertype) {
           has_been_compiled = true;
         }
@@ -1928,7 +1961,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
         case STRUCT_TYPE: {
 
           StructInitializationAST* init = (StructInitializationAST*) var->value;
-          StructAST* str = (StructAST*) var->type;
+          StructType* str = (StructType*) var->type;
           fprintf(file, "\nT_%s v_%s = {0};", var->type->name, var->name);
           if (str->has_initializer) {
             UNIMPLEMENTED;
@@ -2012,7 +2045,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       ReturnAST* ret = (ReturnAST*) stmt;
       if (ret->value->expr_type == STRUCT_INIT_EXPR) {
         StructInitializationAST* init = (StructInitializationAST*) ret->value;
-        StructAST* str = (StructAST*) init->expr.type;
+        StructType* str = (StructType*) init->expr.type;
         fprintf(file, "\n{\nT_%s __returnval = {0};", ret->value->type->name);
         if (str->has_initializer) {
           UNIMPLEMENTED;
@@ -2098,7 +2131,7 @@ int main(int argc, char const *argv[]) {
         } break;
         case STRUCT_DECLARATION_STMT: {
           arrayPushVal(&statements, &stmt);
-          logDebugInfo("Adding type %s\n", ((StructAST*) stmt)->type.name);
+          logDebugInfo("Adding type %s\n", ((StructType*) stmt)->type.name);
         } break;
         default:
           logErrorAt(stmt->pos, "Only variable, struct and function definitions allowed at global scope\n");
@@ -2167,17 +2200,17 @@ int main(int argc, char const *argv[]) {
         /* TODO: compile all structs in all scopes */
         {
           DynArray compiled_structs;
-          arrayInit(&compiled_structs, 16, sizeof(StructAST*));
+          arrayInit(&compiled_structs, 16, sizeof(StructType*));
 
           /* write types */
           for (int i = 0; i < global_scope->num_statements; ++i) {
             StatementAST* stmt = global_scope->statements[i];
             if (stmt->type == STRUCT_DECLARATION_STMT) {
-              StructAST* str = (StructAST*) stmt;
+              StructType* str = (StructType*) stmt;
 
               /* check if it has been compiled already */
               bool has_been_compiled = false;
-              for (StructAST** s = arrayBegin(&compiled_structs), **end = arrayEnd(&compiled_structs); s != end; ++s) {
+              for (StructType** s = arrayBegin(&compiled_structs), **end = arrayEnd(&compiled_structs); s != end; ++s) {
                 if (*s == str) {
                   has_been_compiled = true;
                 }
