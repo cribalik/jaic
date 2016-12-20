@@ -56,9 +56,14 @@ static void* arrayPushN(DynArray* arr, int n) {
   return ((byte*) arr->data) + (arr->item_size * (arr->count - n));
 }
 
-static void arrayPushVal(DynArray* arr, void* in) {
+static void* arrayLast(DynArray* arr) {
+  return arr->data + (arr->count - 1) * arr->item_size;
+}
+
+static void* arrayPushVal(DynArray* arr, void* in) {
   void* r = arrayPush(arr);
   memcpy(r, in, arr->item_size);
+  return arrayLast(arr);
 }
 
 static void* arrayBegin(DynArray* arr) {
@@ -67,10 +72,6 @@ static void* arrayBegin(DynArray* arr) {
 
 static void* arrayEnd(DynArray* arr) {
   return arr->data + (arr->count * arr->item_size);
-}
-
-static void* arrayLast(DynArray* arr) {
-  return arr->data + (arr->count - 1) * arr->item_size;
 }
 
 static void* arrayGet(DynArray* arr, int i) {

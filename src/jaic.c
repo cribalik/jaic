@@ -70,17 +70,6 @@ typedef struct {
 global FilePos prev_pos = {.line = 1, .column = 0};
 global FilePos next_pos = {.line = 1, .column = 0};
 
-static int binopPrecedence(char op) {
-  switch (op) {
-    case '-': return 10;
-    case '+': return 10;
-    case '*': return 20;
-    case '/': return 20;
-    default: return 0;
-  }
-}
-
-
 /** Tokenizer stuff **/
 
 static int num_chars_read = 0;
@@ -315,7 +304,6 @@ static void goto_matching_brace() {
   eatToken();
 }
 
-
 /** AST Definitions **/
 
 typedef struct ExpressionAST ExpressionAST;
@@ -355,18 +343,32 @@ typedef struct ReturnAST {
 /* Type */
 
 typedef enum Type {
-  UNKNOWN,
+  UNKNOWN_TYPE,
   /* builtin types */
-  VOID,
-  INT,
-  FLOAT,
-  U8,
+  VOID_TYPE,
+  INT_TYPE,
+  FLOAT_TYPE,
 
-  /* struct */
-  STRUCT,
+  F32_TYPE,
+  F64_TYPE,
 
-  /* function */
-  FUNCTION
+  U8_TYPE,
+  U16_TYPE,
+  U32_TYPE,
+  U64_TYPE,
+
+  I8_TYPE,
+  I16_TYPE,
+  I32_TYPE,
+  I64_TYPE,
+
+  PINT_TYPE, // size_t
+
+  STRUCT_TYPE,
+
+  ARRAY_TYPE,
+
+  FUNCTION_TYPE
 } Type;
 
 typedef struct TypeAST {
@@ -378,11 +380,31 @@ typedef struct TypeAST {
 
 global TypeAST builtin_types[] = {
   {},
-  {.type = VOID, .name = "void"},
-  {.type = INT, .name = "int"},
-  {.type = FLOAT, .name = "float"},
-  {.type = U8, .name = "u8"},
+  {.type = VOID_TYPE, .name = "void"},
+  {.type = INT_TYPE, .name = "int"},
+  {.type = FLOAT_TYPE, .name = "float"},
+
+  {.type = F32_TYPE, .name = "f32"},
+  {.type = F64_TYPE, .name = "f64"},
+
+  {.type = U8_TYPE, .name = "u8"},
+  {.type = U16_TYPE, .name = "u16"},
+  {.type = U32_TYPE, .name = "u32"},
+  {.type = U64_TYPE, .name = "u64"},
+
+  {.type = I8_TYPE, .name = "i8"},
+  {.type = I16_TYPE, .name = "i16"},
+  {.type = I32_TYPE, .name = "i32"},
+  {.type = I64_TYPE, .name = "i64"},
+
+  {.type = PINT_TYPE, .name = "pint"},
+
 };
+
+/* some dummy types, like telling evaluateTypeOfExpression that we want an array, but don't know the type of the elements */
+global TypeAST array_no_internal_type = {.type = ARRAY_TYPE, .name = "<array_dummy_type>"};
+
+global DynArray array_types;
 
 typedef struct MemberAST {
   char* name;
@@ -396,6 +418,11 @@ typedef struct StructAST {
   MemberAST* members;
   bool has_initializer;
 } StructAST;
+
+typedef struct ArrayType {
+  TypeAST type;
+  TypeAST* base_type;
+} ArrayType;
 
 /* Expressions */
 
@@ -869,6 +896,19 @@ static ExpressionAST* parsePrimitive() {
   }
 }
 
+static int binopPrecedence(char op) {
+  switch (op) {
+    case '-': return 10;
+    case '+': return 10;
+    case '*': return 20;
+    case '/': return 20;
+    case '%': return 20;
+    case '<': return 5;
+    case '>': return 5;
+    default: return 0;
+  }
+}
+
 static ExpressionAST* parseExpression() {
   ExpressionAST* expr = parsePrimitive();
   if (expr) {
@@ -885,6 +925,39 @@ static ExpressionAST* parseExpression() {
     }
   }
   return expr;
+}
+
+char* parseType() {
+  void* start = arenaGetCurrent(perm_arena);
+
+  bool partial_success = false;
+
+  while (token == '[') {
+    eatToken();
+    partial_success = true;
+    *(char*)arenaPush(&perm_arena, 1) = '[';
+    if (token == ']') {
+      eatToken();
+      *(char*)arenaPush(&perm_arena, 1) = ']';
+    } else {
+      logErrorAt(prev_pos, "Expected ']' after '['\n");
+      arenaPopTo(&perm_arena, start);
+      return 0;
+    }
+  }
+
+  if (token == TOK_IDENTIFIER) {
+    arenaPushString(&perm_arena, identifierStr);
+    eatToken();
+  } else {
+    if (partial_success) {
+      logErrorAt(prev_pos, "Expected type name\n");
+    }
+    arenaPopTo(&perm_arena, start);
+    return 0;
+  }
+
+  return start;
 }
 
 static StatementAST* _parseStatement() {
@@ -914,38 +987,43 @@ static StatementAST* _parseStatement() {
         ExpressionAST* from = parseExpression();
         if (from) {
           loop->from = from;
+
+          // range loop?
           if (token == TOK_ARROW) {
             eatToken();
             loop->to = parseExpression();
-            if (loop->to) {
-          // parse block
-              if (token == '{') {
-                eatToken();
-                DynArray statements;
-                arrayInit(&statements, 16, sizeof(StatementAST*));
-                while (1) {
-                  if (token == '}') {
-                    eatToken();
-                    break;
-                  }
-                  StatementAST* stmt = parseStatement();
-                  if (stmt) {
-                    arrayPushVal(&statements, &stmt);
-                  } else {
-                    logErrorAt(prev_pos, "Failed to parse statement in loop body\n");
-                  }
-                }
-                loop->body.num_statements = arrayCount(&statements);
-                loop->body.statements = pushArrayToArena(&statements, &perm_arena);
-                arrayFree(&statements);
-                return &loop->body.stmt;
-              } else {
-                logErrorAt(prev_pos, "Expected block after loop. Did you forget '{'?\n");
-              }
+            if (!loop->to) {
+              logErrorAt(prev_pos, "Could not parse expression at end of loop\n");
               return 0;
-            } else {logErrorAt(prev_pos, "Could not parse expression at end of loop\n"); }
-          } else {logErrorAt(prev_pos, "Unexpected token %s. Did you mean to write '->'?\n", print_token()); }
-        } else {logErrorAt(prev_pos, "Could not parse expression at start of loop\n"); }
+            }
+          }
+
+          // parse block
+          if (token == '{') {
+            eatToken();
+            DynArray statements;
+            arrayInit(&statements, 16, sizeof(StatementAST*));
+            while (1) {
+              if (token == '}') {
+                eatToken();
+                break;
+              }
+              StatementAST* stmt = parseStatement();
+              if (stmt) {
+                arrayPushVal(&statements, &stmt);
+              } else {
+                logErrorAt(prev_pos, "Failed to parse statement in loop body\n");
+              }
+            }
+            loop->body.num_statements = arrayCount(&statements);
+            loop->body.statements = pushArrayToArena(&statements, &perm_arena);
+            arrayFree(&statements);
+            return &loop->body.stmt;
+          } else {
+            logErrorAt(prev_pos, "Expected block after loop. Did you forget '{'?\n");
+          }
+          return 0;
+        } else {logErrorAt(prev_pos, "Expected expression\n");}
       } else {logErrorAt(prev_pos, "Expected ':'\n");}
     } else {logErrorAt(prev_pos, "Expected a name for element in list.. For example 'for x : list {...}'\n");}
     return 0;
@@ -968,18 +1046,17 @@ static StatementAST* _parseStatement() {
       /* Declaration? */
       if (expr->expr_type == VARIABLE_GET_EXPR && token == ':') {
         VariableGetAST* lhs = (VariableGetAST*) expr;
-        char* type = 0;
         eatToken();
 
-        if (token == TOK_IDENTIFIER) {
-          type = arenaPushString(&perm_arena, identifierStr);
-          logDebugInfo("With declared type %s\n", type);
-          eatToken();
+        char* typename = parseType();
+
+        if (typename) {
+          logDebugInfo("With declared type %s\n", typename);
           if (token != '=') {
             VariableDeclarationAST* var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
             var->stmt.type = VARIABLE_DECLARATION_STMT;
             var->name = lhs->name;
-            var->type_name = type;
+            var->type_name = typename;
             logDebugInfo("Found a variable declaration for %s with type %s and no value\n", var->name, var->type_name);
             // TODO: default initialization of variable here!
             return &var->stmt;
@@ -1001,7 +1078,7 @@ static StatementAST* _parseStatement() {
               StructAST* str = arenaPush(&perm_arena, sizeof(StructAST));
               str->type.stmt.type = STRUCT_DECLARATION_STMT;
               str->type.pos = pos_of_identifier;
-              str->type.type = STRUCT;
+              str->type.type = STRUCT_TYPE;
               str->type.name = lhs->name;
               DynArray members; /* MemberAST */
               arrayInit(&members, 4, sizeof(MemberAST));
@@ -1036,7 +1113,7 @@ static StatementAST* _parseStatement() {
               }
 
               if (success) {
-                if (!type) {
+                if (!typename) {
                   str->num_members = arrayCount(&members);
                   str->members = pushArrayToArena(&members, &perm_arena);
                   arrayFree(&members);
@@ -1056,7 +1133,7 @@ static StatementAST* _parseStatement() {
             if (fun) {
               fun->pos = pos_of_identifier;
               logDebugInfoAt(pos_of_identifier, "Function declaration for '%s' found\n", fun->name);
-              if (!type) {
+              if (!typename) {
                 logDebugInfo("Found a function definition with name %s, and %i arguments\n", fun->name, fun->num_args);
                 return &fun->body.stmt;
               } else {
@@ -1076,7 +1153,7 @@ static StatementAST* _parseStatement() {
               var->stmt.type = VARIABLE_DECLARATION_STMT;
               var->stmt.pos = pos_of_identifier;
               var->name = lhs->name;
-              var->type_name = type ? type : 0;
+              var->type_name = typename;
               var->value = value;
               var->type = 0;
               logDebugInfo("Found a variable declaration for %s with type %s and a value of type %i\n", var->name, var->type_name, var->value->expr_type);
@@ -1086,7 +1163,6 @@ static StatementAST* _parseStatement() {
 
           return 0;
         }
-
         else {
           logErrorAt(expr->stmt.pos, "Unexpected token %s, expected type name, '=', or ';'\n", print_token());
           return 0;
@@ -1148,14 +1224,37 @@ static StatementAST* parseStatement() {
 static void evaluateTypeOfStruct(StructAST* str, CompoundStatementAST* scope);
 
 static TypeAST* getTypeDeclaration(char* name, CompoundStatementAST* scope) {
-  // add the builtin to the global scope
+  // builtin?
   for (int i = 1; i < ARRSIZE(builtin_types); ++i) {
     if (strcmp(builtin_types[i].name, name) == 0) {
       return builtin_types + i;
     }
   }
 
-  // check builtin types
+  // check for array types
+  if (name[0] == '[' && name[1] == ']') {
+    ArrayType* result = 0;
+    for (ArrayType *it = arrayBegin(&array_types), *end = arrayEnd(&array_types); it < end; ++it) {
+      if (strcmp(it->type.name, name) == 0) {
+        result = it;
+        break;
+      }
+    }
+
+    // create new type if needed
+    if (!result) {
+      ArrayType newtype = {.type = {.name = name, .type = ARRAY_TYPE }};
+      newtype.base_type = getTypeDeclaration(name+2, scope);
+      if (!newtype.base_type) {
+        return 0;
+      }
+      result = arrayPushVal(&array_types, &newtype);
+    }
+    return &result->type;
+  }
+
+
+  // user defined types
   while (scope) {
     for (int i = 0; i < scope->num_statements; ++i) {
       StatementAST* stmt = scope->statements[i];
@@ -1191,12 +1290,12 @@ static DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope)
   return funs;
 }
 
-static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* name, CompoundStatementAST* scope);
+static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope);
 
 static VariableDeclarationAST it_index_declaration = {
   .name = "it_index",
   .type_name = "int",
-  .type = &builtin_types[INT]
+  .type = &builtin_types[INT_TYPE]
 };
 static VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatementAST* scope) {
   while (scope) {
@@ -1244,7 +1343,7 @@ static void _evaluateTypeOfStruct(StructAST* str, DynArray* parents, CompoundSta
         logErrorAt(str->members[i].pos, "Could not find type %s\n", str->members[i].type_name);
         return;
       }
-      if (str->members[i].type->type == STRUCT) {
+      if (str->members[i].type->type == STRUCT_TYPE) {
         for (char **parent = arrayBegin(parents), **end = arrayEnd(parents); parent != end; ++parent) {
           if (strcmp(*parent, str->members[i].type->name) == 0) {
             logErrorAt(str->members[i].pos, "Type %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
@@ -1268,7 +1367,9 @@ static void evaluateTypeOfStruct(StructAST* str, CompoundStatementAST* scope) {
 
 static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, CompoundStatementAST* scope);
 static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope) {
-  if (!var || var->type) return;
+  if (!var || var->type) {
+    return;
+  }
 
   TypeAST* declared_type = 0;
 
@@ -1282,8 +1383,7 @@ static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Compo
     var->type = declared_type;
   }
 
-    /* TODO: check if is_declaration, if not, we can use the type from the declaration! */
-
+  /* TODO: check if is_declaration, if not, we can use the type from the declaration! */
   if (var->value) {
     evaluateTypeOfExpression(var->value, var->type, scope);
     if (!var->value->type) {
@@ -1294,7 +1394,7 @@ static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Compo
     var->type = var->value->type;
   }
 
-    // check that infered expression type and stated type match
+  // check that infered expression type and stated type match
   if (var->value && var->value->type && declared_type && var->value->type != declared_type) {
     logErrorAt(prev_pos, "Inferred type of '%s': '%s' differs from declared type '%s'\n", var->name, var->value->type->name, declared_type->name);
     var->type = 0;
@@ -1331,11 +1431,11 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
   switch (expr->expr_type) {
 
     case FLOAT_EXPR: {
-      expr->type = &builtin_types[FLOAT];
+      expr->type = &builtin_types[FLOAT_TYPE];
     } break;
 
     case INT_EXPR: {
-      expr->type = &builtin_types[INT];
+      expr->type = &builtin_types[INT_TYPE];
     } break;
 
     case CALL_EXPR: {
@@ -1410,7 +1510,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
       MemberAccessAST* ast = (MemberAccessAST*) expr;
       evaluateTypeOfExpression(ast->base, 0, scope);
       if (ast->base->type) {
-        if (ast->base->type->type == STRUCT) {
+        if (ast->base->type->type == STRUCT_TYPE) {
 
           // find member
           StructAST* str = (StructAST*) ast->base->type;
@@ -1427,15 +1527,25 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
             assert(match->type);
             ast->expr.type = match->type;
           } else {logErrorAt(ast->expr.stmt.pos, "struct %s has no member %s\n", ast->base->type->name, ast->name);}
-        } else {logErrorAt(ast->base->stmt.pos, "Can only access members of structs, %s is not a struct\n", ast->base->type->name);}
+        } else if (ast->base->type->type == ARRAY_TYPE) {
+
+          if (!strcmp(ast->name, "count") || !strcmp(ast->name, "size") || !strcmp(ast->name, "length")) {
+            // TODO: size_t
+            ast->expr.type = &builtin_types[INT_TYPE];
+          }
+          else if (!strcmp(ast->name, "data")) {
+            logErrorAt(ast->expr.stmt.pos, "Pointers not yet implemented\n");
+            UNIMPLEMENTED;
+          }
+
+        } else {logErrorAt(ast->base->stmt.pos, "Can only access members of structs or arrays, '%s' is neither\n", ast->base->type->name);}
       }
     } break;
-
 
     case STRUCT_INIT_EXPR: {
       StructInitializationAST* ast = (StructInitializationAST*) expr;
       if (evidence) {
-        if (evidence->type == STRUCT) {
+        if (evidence->type == STRUCT_TYPE) {
           StructAST* target = (StructAST*) evidence;
           bool all_match = true;
           for (int i = 0; i < ast->num_members; ++i) {
@@ -1478,6 +1588,19 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, TypeAST* evidence, Com
         logErrorAt(ast->lhs->stmt.pos, "Type of left hand side '%s' does not match type of right hand side '%s'\n", ast->lhs->type->name, ast->rhs->type->name);
       }
     } break;
+  }
+
+  if (evidence && expr->type) {
+    if (evidence == &array_no_internal_type) {
+      if (expr->type->type != ARRAY_TYPE) {
+        logErrorAt(expr->stmt.pos, "Context demands array, but expression was of type %s\n", expr->type->name);
+        expr->type = 0;
+      }
+    }
+    else if (evidence != expr->type) {
+      logErrorAt(expr->stmt.pos, "Context demands type %s, but expression was type %s\n", evidence->name, expr->type->name);
+      expr->type = 0;
+    }
   }
 }
 
@@ -1534,15 +1657,27 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
         LoopAST* loop = (LoopAST*) stmt;
         loop->body.parent_scope = scope;
         // TODO: not int, but size_t
-        evaluateTypeOfExpression(loop->from, &builtin_types[INT], scope);
-        evaluateTypeOfExpression(loop->to, &builtin_types[INT], scope);
-        if (!loop->from->type || !loop->to->type) {
-          logErrorAt(loop->from->stmt.pos, "Loop indexes are not integers\n");
+        if (loop->to) {
+          evaluateTypeOfExpression(loop->from, &builtin_types[INT_TYPE], scope);
+          evaluateTypeOfExpression(loop->to, &builtin_types[INT_TYPE], scope);
+          if (!loop->from->type || !loop->to->type) {
+            logErrorAt(loop->from->stmt.pos, "Loop indexes are not integers\n");
+          }
+          if (loop->from->type != loop->to->type) {
+            logErrorAt(loop->from->stmt.pos, "Types of start index and stop index differ\n");
+          }
+          loop->it.type = loop->from->type;
+        } else {
+          evaluateTypeOfExpression(loop->from, &array_no_internal_type, scope);
+          assert(!loop->to);
+          if (loop->from->type) {
+            ArrayType* arr = (ArrayType*) loop->from->type;
+            assert(loop->from->type->type == ARRAY_TYPE);
+            loop->it.type = arr->base_type;
+          }
+          else {logErrorAt(loop->from->stmt.pos, "Loop iteratable must be of array type\n"); }
         }
-        if (loop->from->type != loop->to->type) {
-          logErrorAt(loop->from->stmt.pos, "Types of start index and stop index differ\n");
-        }
-        loop->it.type = loop->from->type;
+
         doTypeInferenceForScope(&loop->body);
       } break;
 
@@ -1603,7 +1738,7 @@ static void compile_type_to_c(FILE* header, FILE* body, StructAST* str, DynArray
   // check if we need to compile the members types first
   for (int i = 0; i < str->num_members; ++i) {
     MemberAST* member = str->members + i;
-    if (member->type->type == STRUCT) {
+    if (member->type->type == STRUCT_TYPE) {
       StructAST* membertype = (StructAST*) member->type;
       bool has_been_compiled = false;
       for (StructAST** s = arrayBegin(done), **end = arrayEnd(done); s != end; ++s) {
@@ -1730,30 +1865,53 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
 
     case LOOP_STMT: {
       LoopAST* loop = (LoopAST*) stmt;
-      // TODO: use size_t instead
-      if (loop->iterator_name) {
+
+      // ranged based loop?
+      if (loop->to) {
+        
         fprintf(file, "\nfor (int v_%s = ", loop->iterator_name);
-      } else {
-        fprintf(file, "\nfor (int it_index = ");
+        compile_expression_to_c(loop->from, file);
+
+        fprintf(file, ", end_index = ");
+        compile_expression_to_c(loop->to, file);
+
+        if (loop->index_name) {
+          fprintf(file, ", v_%s = 0", loop->index_name);
+        }
+
+        fprintf(file, "; v_%s < end_index; ++v_%s", loop->iterator_name, loop->iterator_name);
+
+        if (loop->index_name) {
+          fprintf(file, ", ++v_%s", loop->index_name);
+        }
+
+        fprintf(file, ") {");
       }
-      compile_expression_to_c(loop->from, file);
-      fprintf(file, ", end_index = ");
-      compile_expression_to_c(loop->to, file);
-      if (loop->index_name) {
-        fprintf(file, ", v_%s = 0", loop->index_name);
+      // array loop?
+      else {
+        ArrayType* arr = (ArrayType*) loop->from->type;
+        if (loop->index_name) {
+          fprintf(file, "\nfor (int v_%s = 0, end_index = ", loop->index_name);
+        } else {
+          fprintf(file, "\nfor (int it_index = 0, end_index = ");
+        }
+        compile_expression_to_c(loop->from, file);
+        fprintf(file, ".length; ");
+        if (loop->index_name) {
+          fprintf(file, "v_%s < end_index; ++v_%s) {", loop->index_name, loop->index_name);
+        } else {
+          fprintf(file, "it_index < end_index; ++it_index) {");
+        }
+        // get array element
+        fprintf(file, "\nT_%s v_%s = ((T_%s*) ", arr->base_type->name, loop->iterator_name, arr->base_type->name);
+        compile_expression_to_c(loop->from, file);
+        fprintf(file, ".data)");
+        if (loop->index_name) {
+          fprintf(file, "[v_%s];", loop->index_name);
+        } else {
+          fprintf(file, "[it_index];");
+        }
       }
-      if (loop->iterator_name) {
-        fprintf(file,
-          "; v_%s < end_index; ++v_%s"
-        , loop->iterator_name, loop->iterator_name);
-      } else {
-        fprintf(file,
-          "; it_index < end_index; ++it_index");
-      }
-      if (loop->index_name) {
-        fprintf(file, ", ++v_%s", loop->index_name);
-      }
-      fprintf(file, ") {");
       for (int i = 0; i < loop->body.num_statements; ++i) {
         compile_statement_to_c(loop->body.statements[i], file);
       }
@@ -1765,29 +1923,63 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       fprintf(file, "\n");
 
       // struct?
-      if (var->type->type == STRUCT) {
-        StructInitializationAST* init = (StructInitializationAST*) var->value;
-        StructAST* str = (StructAST*) var->type;
-        fprintf(file, "T_%s v_%s = {0};", var->type->name, var->name);
-        if (str->has_initializer) {
-          UNIMPLEMENTED;
-        }
-        if (var->value) {
-          String name;
-          stringInit(&name, "v_");
-          stringAppend(&name, var->name);
-          compile_struct_init_to_c(name, init, file);
-          stringFree(&name);
-        }
-      }
-      // builtin
-      else {
-        fprintf(file, "T_%s v_%s", var->type->name, var->name);
-        if (var->value) {
-          fprintf(file, " = ");
-          compile_expression_to_c(var->value, file);
-        }
-        fprintf(file, ";");
+      switch (var->type->type) {
+
+        case STRUCT_TYPE: {
+
+          StructInitializationAST* init = (StructInitializationAST*) var->value;
+          StructAST* str = (StructAST*) var->type;
+          fprintf(file, "\nT_%s v_%s = {0};", var->type->name, var->name);
+          if (str->has_initializer) {
+            UNIMPLEMENTED;
+          }
+          if (var->value) {
+            String name;
+            stringInit(&name, "v_");
+            stringAppend(&name, var->name);
+            compile_struct_init_to_c(name, init, file);
+            stringFree(&name);
+          }
+
+        } break;
+
+        case F32_TYPE:
+        case F64_TYPE:
+        case U16_TYPE:
+        case U32_TYPE:
+        case U64_TYPE:
+        case I8_TYPE:
+        case I16_TYPE:
+        case I32_TYPE:
+        case I64_TYPE:
+        case PINT_TYPE:
+        case U8_TYPE:
+        case INT_TYPE:
+        case FLOAT_TYPE:
+        case FUNCTION_TYPE: {
+          fprintf(file, "\nT_%s v_%s", var->type->name, var->name);
+          if (var->value) {
+            fprintf(file, " = ");
+            compile_expression_to_c(var->value, file);
+          }
+          fprintf(file, ";");
+        } break;
+
+        case ARRAY_TYPE: {
+          if (var->value) {
+            fprintf(file, "\nSlice v_%s = ", var->name);
+            compile_expression_to_c(var->value, file);
+          } else {
+            fprintf(file, "\nSlice v_%s = {0}", var->name);
+          }
+          fprintf(file, ";");
+        } break;
+
+        case UNKNOWN_TYPE:
+        case VOID_TYPE: {
+          logError("Unexpected error encountered\n");
+          exit(1);
+        } break;
       }
     } break;
 
@@ -1880,6 +2072,7 @@ int main(int argc, char const *argv[]) {
 
   // init globals
   arenaInit(&perm_arena);
+  arrayInit(&array_types, 32, sizeof(ArrayType));
 
   /** Parsing **/
 
@@ -1964,8 +2157,10 @@ int main(int argc, char const *argv[]) {
           "typedef double T_f64;\n"
           "typedef float T_float;\n"
           "typedef int T_int;\n"
+          "typedef size_t T_pint;\n"
           "typedef void T_void;\n\n"
           "void* memset( void* dest, int ch, size_t count );\n\n"
+          "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
         );
 
         /* compile all structs in global scope */

@@ -19,6 +19,9 @@ fun1 := (a:int, b:float, c:int) -> int {/*this is a function body*/ }
 fun2 := (a:float, b:int) -> int {/*this is a function body*/}
 fun3 := (a:vec2, b:compound) -> vec2 { fun2(0.1, 3); }
 fun4 := () {}
+add := (a:int, b:int)->int {
+  return a + b;
+}
 
 // some foreign (C) functions
 putchar := (a:int) -> int #foreign
@@ -76,14 +79,10 @@ Monster := type {
   weapon: Weapon
 }
 
-print := (a:int) -> int {
-  putchar(a)
-}
-
 newRichMonster := () -> Monster {
   some_gold := 300
-  more_gold := 300 + 1700
-  return {gold = some_gold + more_gold}
+  more_gold := (2 * 2300) + 300
+  return {gold = some_gold + more_gold*2}
 }
 
 main := () {
@@ -98,18 +97,31 @@ main := () {
   monster = {gold = 20}
 
   // this should be allowed for pointer type but not for scalar type
-  // newMonster().gold = 20 
+  // newRichMonster().gold = -3
+  monster = newRichMonster()
 
   /*
   loop v,i : array {
-    print(i)
+    putchar(i)
   }
   */
 
   for x,i : 97->110 {
-    print(x)
-    print(i+97)
-    print(97+rand())
+    putchar(x)
+    putchar(i+97)
+    putchar(97+rand())
+  }
+
+  arr: []int
+
+  arr2 : []int = arr
+
+  for c : arr {
+    putchar(c)
+  }
+
+  for c,i : arr {
+    putchar(c)
   }
 
 }
