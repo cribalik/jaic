@@ -1,5 +1,6 @@
 #include "array.c"
 #include <assert.h>
+#include <string.h>
 
 
 typedef struct String {
@@ -20,10 +21,25 @@ static int stringAppend(String* a, char* b) {
   int len = strlen(b);
   char* next = arrayPushN(&a->chars, len);
   --next;
+  memcpy(next, b, len);
+  next[len] = 0;
+  return len;
+}
+
+static int stringPrepend(String* a, char* b) {
+  assert(a->chars.count > 0);
+  int len = strlen(b);
+  /* move current string to end */
+  char* next = arrayPushN(&a->chars, len);
+  --next;
+  memmove(next, a->chars.data, a->chars.count - 1);
+  *(char*)arrayLast(&a->chars) = 0;
+
+  /* prepend new string */
+  next = a->chars.data;
   while (*b) {
     *next++ = *b++;
   }
-  *next++ = 0;
   return len;
 }
 
@@ -35,6 +51,12 @@ static void stringPop(String* s, int n) {
 
 static char* stringGet(String* s) {
   return arrayBegin(&s->chars);
+}
+
+static char* stringClear(String* s) {
+  s->chars.count = 1;
+  *(char*)arrayLast(&s->chars) = 0;
+  return s->chars.data;
 }
 
 static void stringFree(String* s) {

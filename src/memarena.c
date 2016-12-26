@@ -30,7 +30,6 @@ static void arenaInit(MemArena* arena) {
 static void* arenaPush(MemArena* arena, int size) {
   assert(size <= ARENA_BLOCK_SIZE);
   if ((*arena)->size + size > ARENA_BLOCK_SIZE) {
-    // guess we get some internal fragmentation by doing this but oh well
     ArenaBlock* new_block = malloc(sizeof(ArenaBlock));
     (*arena)->next = new_block;
     new_block->prev = *arena;
@@ -69,6 +68,15 @@ static void arenaPopTo(MemArena* arena, void* _to) {
     *arena = (*arena)->prev;
     free(tmp);
   }
+}
+
+static void arenaReset(MemArena* arena) {
+  while ((*arena)->prev) {
+    ArenaBlock* next = *arena;
+    free(*arena);
+    *arena = next;
+  }
+  (*arena)->size = 0;
 }
 
 static char* arenaPushString(MemArena* arena, char* str) {

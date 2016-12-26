@@ -1,4 +1,6 @@
 # High
+ * don't access variables not yet declared
+ * check for structs containing themselves
  * arrays
  * loops with arrays
  * pointers
@@ -9,6 +11,7 @@
  * (strongly and loosly typed) enums and (auto-breaking! :D) switch statement
  * default function parameters
  * UFC
+ * parse negative values
 
 # Low
  * check if all code paths have return statements
