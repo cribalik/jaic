@@ -2291,7 +2291,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
     case LOOP_STMT: {
       LoopAST* loop = (LoopAST*) stmt;
 
-      // ranged based loop?
+      /* ranged based loop? */
       if (loop->to) {
         
         if (loop->iter.name) {
@@ -2320,7 +2320,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
 
         fprintf(file, ") {");
       }
-      // array loop?
+      /* array loop? */
       else {
         if (loop->from->type->type == STATIC_ARRAY_TYPE) {
           if (loop->index.name) {
@@ -2344,7 +2344,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
           }
         } else {assert(false);}
 
-        // get array element
+        /* get array element */
         if (loop->iter.name) {
           ArrayType* arr = (ArrayType*) loop->from->type;
           compile_variable_decl_to_c(arr->base_type, loop->iter.name, true, file);
