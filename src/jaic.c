@@ -1222,66 +1222,42 @@ static StatementAST* _parseStatement() {
     return 0;
   }
 
-
   else {
     ExpressionAST* expr = parseExpression();
     if (expr) {
-      /* Declaration? */
+      /* Variable declaration? */
       if (expr->expr_type == VARIABLE_GET_EXPR && token == ':') {
-        TypeAST type_ast = {0};
-        VariableGetAST* lhs = (VariableGetAST*) expr;
+        VariableGetAST* lhs;
+        VariableDeclarationAST* var;
+        lhs = (VariableGetAST*) expr;
+        var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
+        var->stmt.type = VARIABLE_DECLARATION_STMT;
+        var->stmt.pos = pos_of_identifier;
+        var->name = lhs->name;
         eatToken();
 
-        parseType(&type_ast);
+        parseType(&var->type_ast);
 
-        if (type_ast.name) {
+        if (var->type_ast.name) {
           if (token != '=') {
-            VariableDeclarationAST* var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
-            var->stmt.type = VARIABLE_DECLARATION_STMT;
-            var->stmt.pos = pos_of_identifier;
-            var->name = lhs->name;
-            var->type_ast = type_ast;
-            logDebugInfo("Found a variable declaration for %s with type %s and no value\n", var->name, print_type_ast_name(var->type_ast));
-            // TODO: default initialization of variable here!
             return &var->stmt;
           }
         }
 
         if (token == '=') {
-          // check for function, struct or variable definition
           eatToken();
-          pushPosition;
-          pushState;
-
-
-          // expression?
-          popPosition;
-          popState;
-          {
-            ExpressionAST* value = parseExpression();
-            if (value) {
-              VariableDeclarationAST* var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
-              var->stmt.type = VARIABLE_DECLARATION_STMT;
-              var->stmt.pos = pos_of_identifier;
-              var->name = lhs->name;
-              var->type_ast = type_ast;
-              var->value = value;
-              var->type = 0;
-              logDebugInfo("Found a variable declaration for %s with declared type '%s' and a value of type %i\n", var->name, print_type_ast_name(var->type_ast), var->value->expr_type);
-              return &var->stmt;
-            }
+          var->value = parseExpression();
+          if (var->value) {
+            logDebugInfo("Found a variable declaration for %s with declared type '%s' and a value of type %i\n", var->name, print_type_ast_name(var->type_ast), var->value->expr_type);
+            return &var->stmt;
           }
+        }
 
-          return 0;
-        }
-        else {
-          logErrorAt(expr->stmt.pos, "Unexpected token %s, expected type name, '=', or ';'\n", print_token());
-          return 0;
-        }
+        return 0;
       }
 
       // assignment?
-      if (token == '=') {
+      else if (token == '=') {
         eatToken();
         AssignmentAST* ass = arenaPush(&perm_arena, sizeof(AssignmentAST));
         ass->stmt.type = ASSIGNMENT_STMT;
@@ -1620,6 +1596,10 @@ static void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope) {
   arrayFree(&parents);
 }
 
+static bool hasImplicitConversion(Type* from, Type* to) {
+  return from->type == STATIC_ARRAY_TYPE && to->type == ARRAY_TYPE;
+}
+
 static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope);
 static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope) {
   if (!var || var->type) {
@@ -1645,12 +1625,15 @@ static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Compo
       var->type = 0;
       return;
     }
-    var->type = var->value->type;
+    if (!var->type) {
+      var->type = var->value->type;
+    }
   }
 
+
   /* check that infered expression type and stated type match */
-  if (var->value && var->value->type && declared_type && var->value->type != declared_type) {
-    logErrorAt(prev_pos, "Inferred type of '%s': '$t' differs from declared type '$t'\n", var->name, var->value->type, declared_type);
+  if (var->value && declared_type && var->value->type != declared_type && !hasImplicitConversion(var->value->type, declared_type)) {
+    logErrorAt(var->value->stmt.pos, "Inferred type of '%s': '$t' differs from declared type '$t'\n", var->name, var->value->type, declared_type);
     var->type = 0;
     return;
   }
@@ -1862,6 +1845,11 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
   }
 
   if (evidence && expr->type) {
+    /* some implicit conversions.. */
+    if (expr->type->type == STATIC_ARRAY_TYPE && evidence->type == ARRAY_TYPE) {
+      return;
+    }
+
     if (evidence == &array_no_internal_type) {
       if (expr->type->type != ARRAY_TYPE && expr->type->type != STATIC_ARRAY_TYPE) {
         logErrorAt(expr->stmt.pos, "Context demands array, but expression was of type $t\n", expr->type);
@@ -1962,7 +1950,7 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
           logErrorAt(stmt->pos, "Could not infer type of right hand side of assignment\n");
         }
         else if (ass->lhs->type != ass->rhs->type) {
-          logErrorAt(stmt->pos, "Left hand side and right hand side of assignment do not have same types!\n");
+          logErrorAt(stmt->pos, "Left hand side has type $t, but right hand side has type $t\n", ass->lhs->type, ass->rhs->type);
         }
       } break;
 

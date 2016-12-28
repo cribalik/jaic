@@ -112,10 +112,21 @@ fn main() {
   // this should be allowed for pointer type but not for scalar type
   // newRichMonster().gold = 3
 
-  arr: [64]^int
+  arr: [64]int
+  arr[0] = 97
+  arr[1] = 98
+  arr[2] = 99
+  arr[3] = 100
+
+  arr2: []int = arr
+  arr2[3] = 100
 
   for _,i : arr {
-    putchar(i*2)
+    putchar(arr[i])
+  }
+
+  for x : arr {
+    putchar(x)
   }
 
 }

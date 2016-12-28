@@ -1,7 +1,6 @@
 # High
  * don't access variables not yet declared
  * check for structs containing themselves
- * arrays
  * loops with arrays
  * pointers
  * differentiate between expressions that yield temporary, in-place values (struct initializers, binary operators, calls), and expressions that point to something on stack or in memory (variables and member variables of variables)
