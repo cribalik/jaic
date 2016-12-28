@@ -109,28 +109,13 @@ fn should_not_compile() -> int {
 
 fn main() {
 
-  monster: Monster = {
-    gold = rand(),
-    health = 20,
-    weapon = {damage = 3, durability = 10}
-  }
-
-  monster.gold = 20
-  monster = {gold = 20}
-
   // this should be allowed for pointer type but not for scalar type
   // newRichMonster().gold = 3
 
-  arr: []int
+  arr: [64]^int
 
-  arr2 : []int = arr
-
-  for c,i : arr {
-    putchar(c)
-  }
-
-  for c : 97->110 {
-    putchar(c)
+  for _,i : arr {
+    putchar(i*2)
   }
 
 }

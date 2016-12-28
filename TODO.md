@@ -12,6 +12,7 @@
  * default function parameters
  * UFC
  * parse negative values
+ * function pointers
 
 # Low
  * check if all code paths have return statements

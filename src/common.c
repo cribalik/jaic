@@ -21,10 +21,10 @@ typedef int bool32;
 #define ZERO(ptr) memset(ptr, 0, sizeof(*ptr))
 
 // Logging
-#define logErrorAt(filepos, msg, ...) print(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column - 1, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column - 1); found_error = true;
+#define logErrorAt(filepos, msg, ...) print(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column); found_error = true;
 #define logError(msg, ...) print(stderr, "%s(%s:%i): %serror:%s%s " msg, BOLD, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); found_error = true;
 #define logNote(msg, ...) print(stderr, "%s (%s:%i): %snote:%s%s " msg, BOLD, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__);
-#define logNoteAt(filepos, msg, ...) print(stderr, "%s%s:%i:%i (%s:%i): %snote:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column - 1, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column - 1);
+#define logNoteAt(filepos, msg, ...) print(stderr, "%s%s:%i:%i (%s:%i): %snote:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column);
 
 #ifdef DEBUG
 #define logDebugInfo(msg, ...) print(stderr, "%s%s:%i: %sdebug:%s%s " msg, BOLD, __FILE__, __LINE__, GREEN, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__)
@@ -54,7 +54,7 @@ void printLine(FILE* out, char* filename, int line, int column) {
     c = getc(file);
   }
   putc('\n', out);
-  for (int i = 0; i < column-2; ++i) {
+  for (int i = 0; i < column-1; ++i) {
     putc(' ', out);
   }
   putc('^', out);
