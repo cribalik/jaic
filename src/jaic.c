@@ -1949,7 +1949,7 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
         else if (!ass->rhs->type) {
           logErrorAt(stmt->pos, "Could not infer type of right hand side of assignment\n");
         }
-        else if (ass->lhs->type != ass->rhs->type) {
+        else if (ass->lhs->type != ass->rhs->type && !hasImplicitConversion(ass->rhs->type, ass->lhs->type)) {
           logErrorAt(stmt->pos, "Left hand side has type $t, but right hand side has type $t\n", ass->lhs->type, ass->rhs->type);
         }
       } break;
@@ -2151,7 +2151,7 @@ static void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArra
   }
 }
 
-static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
+static void compile_expression_to_c(ExpressionAST* expr, Type* cast, FILE* body) {
   switch (expr->expr_type) {
     case UNKNOWN_EXPR: assert(false); break;
 
@@ -2409,6 +2409,12 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
           compile_expression_to_c(ass->lhs, file);
           fprintf(file, "));");
           compile_struct_init_to_c(ass->lhs, init, file, true);
+        } else if (ass->rhs->type->type == STATIC_ARRAY_TYPE && ass->lhs->type->type == ARRAY_TYPE) {
+          compile_expression_to_c(ass->lhs, file);
+          fprintf(file, " = static_array_into_array(");
+          compile_expression_to_c(ass->rhs, file);
+          /* TODO: size_t */
+          fprintf(file, ", %i);", ((StaticArrayType*) ass->rhs->type)->size);
         } else {
           compile_expression_to_c(ass->lhs, file);
           fprintf(file, " = ");
@@ -2581,6 +2587,7 @@ int main(int argc, char const *argv[]) {
           "typedef void T_void;\n\n"
           "void* memset( void* dest, int ch, size_t count );\n\n"
           "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
+          "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n"
         );
 
         /* compile all structs in global scope */
