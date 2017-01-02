@@ -102,7 +102,7 @@ static int gettok() {
     curr_char = getChar(file);
   }
 
-  // check for comments
+  /* check for comments */
   while (curr_char == '/') {
     curr_char = getChar(file);
     if (curr_char == '/') {
@@ -149,7 +149,7 @@ static int gettok() {
 
   prev_pos = next_pos;
 
-  // identifier
+  /* identifier */
   if (isalpha(curr_char)) {
     int i = 0;
     for (i = 0; i < BUFFER_SIZE && (isalpha(curr_char) || isdigit(curr_char) || curr_char=='_'); ++i) {
@@ -179,7 +179,7 @@ static int gettok() {
     }
   }
 
-  // number literal
+  /* number literal */
   else if (isdigit(curr_char)) {
     int i;
     for (i = 0; i < BUFFER_SIZE && isdigit(curr_char); ++i) {
@@ -202,7 +202,7 @@ static int gettok() {
         if (i == BUFFER_SIZE) {
           logErrorAt(prev_pos, "Reached max size for float number\n");
         }
-        // TODO: check for suffixes here e.g. 30.0f
+        /* TODO: check for suffixes here e.g. 30.0f */
         else {
           buf[i] = '\0';
           floatVal = strtod(buf, NULL);
@@ -212,7 +212,7 @@ static int gettok() {
         logErrorAt(prev_pos, "Unexpected character '%c', expected floating point number or '..'\n", curr_char);
       }
     }
-    // TODO: check for suffixes here e.g. 10u32
+    /* TODO: check for suffixes here e.g. 10u32 */
     else {
       buf[i] = '\0';
       intVal = atoi(buf);
@@ -220,12 +220,12 @@ static int gettok() {
     }
   }
 
-  // eof
+  /* eof */
   else if (curr_char == EOF) {
     return TOK_EOF;
   }
 
-  // arrow
+  /* arrow */
   else if (curr_char == '-') {
     curr_char = getChar(file);
     if (curr_char == '>') {
@@ -236,7 +236,7 @@ static int gettok() {
     }
   }
 
-  // double dots
+  /* double dots */
   else if (curr_char == '.') {
     curr_char = getChar(file);
     if (curr_char == '.') {
@@ -282,12 +282,12 @@ static char* print_token() {
 
 static int num_chars_last_read = 0;
 static void eatToken() {
-  // logDebugInfo("before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column);
+  /* logDebugInfo("before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column); */
   int i = num_chars_read;
   token = gettok();
   eatWhitespace();
   num_chars_last_read = num_chars_read - i;
-  // logDebugInfo("last read: %i token: %s\n", num_chars_last_read, print_token());
+  /* logDebugInfo("last read: %i token: %s\n", num_chars_last_read, print_token()); */
 }
 
 static void goto_matching_brace() {
@@ -318,7 +318,7 @@ typedef enum StatementType {
   FUNCTION_DECLARATION_STMT,
   ASSIGNMENT_STMT,
   EXPRESSION_STMT,
-  COMPOUND_STMT, // new scope
+  COMPOUND_STMT, /* new scope */
   LOOP_STMT,
   RETURN_STMT,
 } StatementType;
@@ -333,7 +333,7 @@ typedef struct CompoundStatementAST {
   struct CompoundStatementAST* parent_scope;
   int num_statements;
   StatementAST** statements;
-  // TODO: optimize variable lookups
+  /* TODO: optimize variable lookups */
 } CompoundStatementAST;
 
 typedef struct ReturnAST {
@@ -363,7 +363,7 @@ typedef enum TypeClass {
   I32_TYPE,
   I64_TYPE,
 
-  PINT_TYPE, // size_t
+  USIZE_TYPE, /* size_t */
 
   STRUCT_TYPE,
 
@@ -415,7 +415,7 @@ global char* builtin_typenames[] = {
   "i16",
   "i32",
   "i64",
-  "pint",
+  "usize",
 };
 
 global Type builtin_types[] = {
@@ -437,7 +437,7 @@ global Type builtin_types[] = {
   {.type = I32_TYPE},
   {.type = I64_TYPE},
 
-  {.type = PINT_TYPE},
+  {.type = USIZE_TYPE},
 };
 
 /* some dummy types, like telling evaluateTypeOfExpression that we want an array, but don't know the type of the elements */
@@ -513,8 +513,8 @@ typedef struct Constant {
 
 typedef struct MemberAccessAST {
   ExpressionAST expr;
-  ExpressionAST* base; // in  a.b.x, this is a.b
-  char* name; // in a.b.x, this is x
+  ExpressionAST* base; /* in  a.b.x, this is a.b */
+  char* name; /* in a.b.x, this is x */
 } MemberAccessAST;
 
 typedef struct StructDeclarationAST {
@@ -771,7 +771,7 @@ static ExpressionAST* parsePrimitive() {
             return 0;
           }
         }
-        // member access?
+        /* member access? */
         else if (token == '.') {
           eatToken();
           if (token == TOK_IDENTIFIER) {
@@ -844,7 +844,7 @@ static ExpressionAST* parsePrimitive() {
             ast = 0;
             break;
           }
-          //we failed, eat everything to matching brace
+          /*we failed, eat everything to matching brace */
         }
         if (ast) {
           ast->members = pushArrayToArena(&members, &perm_arena);
@@ -894,7 +894,7 @@ static ExpressionAST* parseExpression() {
       eatToken();
       bin->rhs = parseExpression();
       return &bin->expr;
-      // TODO: operator precedence
+      /* TODO: operator precedence */
     }
   }
   return expr;
@@ -1002,7 +1002,7 @@ static StatementAST* _parseStatement() {
         if (from) {
           loop->from = from;
 
-          // range loop?
+          /* range loop? */
           if (token == TOK_ARROW) {
             eatToken();
             loop->to = parseExpression();
@@ -1012,7 +1012,7 @@ static StatementAST* _parseStatement() {
             }
           }
 
-          // parse block
+          /* parse block */
           if (token == '{') {
             eatToken();
             DynArray statements;
@@ -1112,7 +1112,7 @@ static StatementAST* _parseStatement() {
         arrayFree(&args);
 
         /* return value */
-        if (token == TOK_ARROW) {
+        if (token == ':') {
           eatToken();
           parseType(&fun->return_type_ast);
         } else {
@@ -1167,7 +1167,7 @@ static StatementAST* _parseStatement() {
     return 0;
   }
 
-  // struct?
+  /* struct? */
   else if (token == TOK_STRUCT) {
     StructDeclarationAST* decl = arenaPush(&perm_arena, sizeof(StructDeclarationAST));
     decl->stmt.type = STRUCT_DECLARATION_STMT;
@@ -1194,7 +1194,7 @@ static StatementAST* _parseStatement() {
             if (token == ':') {
               eatToken();
               parseType(&member->type_ast);
-              // TODO: parse default value
+              /* TODO: parse default value */
               if (member->type_ast.name) {
                 if (token == '}') {
                   eatToken();
@@ -1256,7 +1256,7 @@ static StatementAST* _parseStatement() {
         return 0;
       }
 
-      // assignment?
+      /* assignment? */
       else if (token == '=') {
         eatToken();
         AssignmentAST* ass = arenaPush(&perm_arena, sizeof(AssignmentAST));
@@ -1273,7 +1273,7 @@ static StatementAST* _parseStatement() {
         }
       }
 
-      // just an expression
+      /* just an expression */
       else {
         expr->stmt.type = EXPRESSION_STMT;
         return &expr->stmt;
@@ -1502,7 +1502,7 @@ static Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope, b
 };
 
 static DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope) {
-  // TODO: builtin functions?
+  /* TODO: builtin functions? */
   DynArray funs;
   arrayInit(&funs, 2, sizeof(FunctionDeclarationAST*));
   while (scope) {
@@ -1703,14 +1703,14 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
         VariableGetAST* base = (VariableGetAST*) call->base;
         DynArray funs = getFunctionDeclarations(base->name, scope);
         if (arrayCount(&funs)) {
-          // eval functions and find best match
+          /* eval functions and find best match */
           int matches = 0;
           for (FunctionDeclarationAST** it = arrayBegin(&funs), **end = arrayEnd(&funs); it < end; ++it) {
             FunctionDeclarationAST* fun = *it;
             if (!fun->return_type && fun->return_type_ast.name) {
               evaluateTypeOfFunction(fun, scope);
             }
-            // TODO: implicit type conversions?
+            /* TODO: implicit type conversions? */
             bool match = true;
             if (call->num_args != fun->num_args) {
               match = false;
@@ -1731,7 +1731,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
             }
           }
           if (matches > 1) {
-            // TODO: print out actual matches, and not all overload
+            /* TODO: print out actual matches, and not all overload */
             logErrorAt(expr->stmt.pos, "Multiple matching overloads for %s.\n", base->name);
             logNote("Overloads are:\n");
             for (FunctionDeclarationAST** it = arrayBegin(&funs), **end = arrayEnd(&funs); it < end; ++it) {
@@ -1766,7 +1766,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
       if (access->base->type) {
         if (access->base->type->type == STRUCT_TYPE) {
 
-          // find member
+          /* find member */
           StructType* str = (StructType*) access->base->type;
           MemberAST* match = 0;
           for (int i = 0; i < str->num_members; ++i) {
@@ -1784,7 +1784,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
         } else if (access->base->type->type == ARRAY_TYPE) {
 
           if (!strcmp(access->name, "count") || !strcmp(access->name, "size") || !strcmp(access->name, "length")) {
-            // TODO: size_t
+            /* TODO: size_t */
             access->expr.type = &builtin_types[INT_TYPE];
           }
           else if (!strcmp(access->name, "data")) {
@@ -1803,7 +1803,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
           StructType* target = (StructType*) evidence;
           bool all_match = true;
           for (int i = 0; i < ast->num_members; ++i) {
-            // TODO: make sure each member is only mentioned once
+            /* TODO: make sure each member is only mentioned once */
             bool name_match = false;
             for (int j = 0; j < target->num_members; ++j) {
               if (strcmp(ast->members[i].name, target->members[j].name) == 0) {
@@ -1835,7 +1835,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
       BinaryExpressionAST* ast = (BinaryExpressionAST*) expr;
       evaluateTypeOfExpression(ast->lhs, 0, scope);
       evaluateTypeOfExpression(ast->rhs, ast->lhs->type, scope);
-      // TODO: check if operator overload exists
+      /* TODO: check if operator overload exists */
       if (ast->lhs->type == ast->rhs->type) {
         ast->expr.type = ast->lhs->type;
       } else {
@@ -1864,7 +1864,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
 }
 
 static void doTypeInferenceForScope(CompoundStatementAST* scope) {
-  // TODO: check for duplicates declarations within same scope
+  /* TODO: check for duplicates declarations within same scope */
 
   for (int i = 0; i < scope->num_statements; ++i) {
     StatementAST* stmt = scope->statements[i];
@@ -1915,7 +1915,7 @@ static void doTypeInferenceForScope(CompoundStatementAST* scope) {
       case LOOP_STMT: {
         LoopAST* loop = (LoopAST*) stmt;
         loop->body.parent_scope = scope;
-        // TODO: not int, but size_t
+        /* TODO: not int, but size_t */
         if (loop->to) {
           evaluateTypeOfExpression(loop->from, &builtin_types[INT_TYPE], scope);
           evaluateTypeOfExpression(loop->to, &builtin_types[INT_TYPE], scope);
@@ -2022,7 +2022,7 @@ static void print(FILE* file, char* fmt, ...) {
               case I16_TYPE: fprintf(file, "i16"); break;
               case I32_TYPE:  fprintf(file, "i32");break;
               case I64_TYPE:  fprintf(file, "i64");break;
-              case PINT_TYPE: fprintf(file, "pint"); break;
+              case USIZE_TYPE: fprintf(file, "usize"); break;
               case STRUCT_TYPE: fprintf(file, "%s", ((StructType*) type)->name); break;
               case ARRAY_TYPE: {
                 fprintf(file, "[]");
@@ -2115,22 +2115,18 @@ static void compile_variable_decl_to_c(Type* type, char* name, bool prefix, FILE
 }
 
 static void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArray* done) {
+  for (StructType** s = arrayBegin(done), **end = arrayEnd(done); s != end; ++s) {
+    if (*s == str) {
+      return;
+    }
+  }
   arrayPushVal(done, &str);
 
-  // check if we need to compile the members types first
+  /* check if we need to compile the members types first */
   for (int i = 0; i < str->num_members; ++i) {
     MemberAST* member = str->members + i;
     if (member->type->type == STRUCT_TYPE) {
-      StructType* membertype = (StructType*) member->type;
-      bool has_been_compiled = false;
-      for (StructType** s = arrayBegin(done), **end = arrayEnd(done); s != end; ++s) {
-        if (*s == membertype) {
-          has_been_compiled = true;
-        }
-      }
-      if (!has_been_compiled) {
-        compile_type_to_c(header, body, membertype, done);
-      }
+      compile_type_to_c(header, body, (StructType*) member->type, done);
     }
   }
 
@@ -2422,7 +2418,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
           fprintf(file, ";");
         }
       } else {
-        // TODO: pretty-print expression types
+        /* TODO: pretty-print expression types */
         logErrorAt(ass->stmt.pos, "Assignment to expression of type %i is not allowed\n", ass->lhs->expr_type);
       }
     } break;
@@ -2487,14 +2483,14 @@ int main(int argc, char const *argv[]) {
     }
   }
 
-  // enable formatting?
+  /* enable formatting? */
   #ifdef LINUX
     if (isatty(1)) {
       enableFormatting();
     }
   #endif
 
-  // init globals
+  /* init globals */
   arenaInit(&perm_arena);
   arrayInit(&generated_types, 32, sizeof(Type*));
   stringInit(&_print_buf, 0);
@@ -2559,69 +2555,58 @@ int main(int argc, char const *argv[]) {
   {
     DynArray mains = getFunctionDeclarations("main", global_scope);
     if (arrayCount(&mains) == 1) {
-      // TODO: check signature of main
-      FILE* header = tmpfile();
-      FILE* body = tmpfile();
-      FILE* tail = tmpfile();
       FunctionDeclarationAST* jai_main = *(FunctionDeclarationAST**) arrayGet(&mains, 0);
-      if (body && header && tail) {
+      if (jai_main->num_args == 0) {
+        /* TODO: check signature of main */
+        FILE* header = tmpfile();
+        FILE* body = tmpfile();
+        FILE* tail = tmpfile();
+        if (body && header && tail) {
 
-        // some builtin types
-        // TODO: make to work on all systems
-        fprintf(header,
-          "#include <stddef.h>\n\n"
-          "#define ARRAY_SIZE(a) (sizeof(a)/sizeof(*a))\n"
-          "typedef char T_i8;\n"
-          "typedef unsigned char T_u8;\n"
-          "typedef short T_i16;\n"
-          "typedef unsigned short T_u16;\n"
-          "typedef int T_i32;\n"
-          "typedef unsigned int T_u32;\n"
-          "typedef long long T_i64;\n"
-          "typedef unsigned long long T_u64;\n"
-          "typedef float T_f32;\n"
-          "typedef double T_f64;\n"
-          "typedef float T_float;\n"
-          "typedef int T_int;\n"
-          "typedef size_t T_pint;\n"
-          "typedef void T_void;\n\n"
-          "void* memset( void* dest, int ch, size_t count );\n\n"
-          "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
-          "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n"
-        );
+          /* some builtin types */
+          /* TODO: make to work on all systems */
+          fprintf(header,
+            "#include <stddef.h>\n\n"
+            "#define ARRAY_SIZE(a) (sizeof(a)/sizeof(*a))\n"
+            "typedef char T_i8;\n"
+            "typedef unsigned char T_u8;\n"
+            "typedef short T_i16;\n"
+            "typedef unsigned short T_u16;\n"
+            "typedef int T_i32;\n"
+            "typedef unsigned int T_u32;\n"
+            "typedef long long T_i64;\n"
+            "typedef unsigned long long T_u64;\n"
+            "typedef float T_f32;\n"
+            "typedef double T_f64;\n"
+            "typedef float T_float;\n"
+            "typedef int T_int;\n"
+            "typedef size_t T_usize;\n"
+            "typedef void T_void;\n\n"
+            "void* memset( void* dest, int ch, size_t count );\n\n"
+            "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
+            "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n"
+          );
 
-        /* compile all structs in global scope */
-        /* TODO: compile all structs and functions in all scopes */
-        {
-          DynArray compiled_structs;
-          arrayInit(&compiled_structs, 16, sizeof(StructType*));
+          /* compile all structs in global scope */
+          /* TODO: compile all structs and functions in all scopes */
+          {
+            DynArray compiled_structs;
+            arrayInit(&compiled_structs, 16, sizeof(StructType*));
 
-          /* write types */
-          for (int i = 0; i < global_scope->num_statements; ++i) {
-            StatementAST* stmt = global_scope->statements[i];
-            if (stmt->type == STRUCT_DECLARATION_STMT) {
-              StructType* str = &((StructDeclarationAST*) stmt)->str;
-
-              /* check if it has been compiled already */
-              bool has_been_compiled = false;
-              for (StructType** s = arrayBegin(&compiled_structs), **end = arrayEnd(&compiled_structs); s != end; ++s) {
-                if (*s == str) {
-                  has_been_compiled = true;
-                }
-              }
-
-              if (!has_been_compiled) {
+            /* write types */
+            for (int i = 0; i < global_scope->num_statements; ++i) {
+              StatementAST* stmt = global_scope->statements[i];
+              if (stmt->type == STRUCT_DECLARATION_STMT) {
+                StructType* str = &((StructDeclarationAST*) stmt)->str;
                 compile_type_to_c(header, body, str, &compiled_structs);
               }
             }
+
+            arrayFree(&compiled_structs);
+            fprintf(header, "\n");
           }
 
-          arrayFree(&compiled_structs);
-          fprintf(header, "\n");
-        }
-
-        /* compile all functions */
-        {
+          /* compile all functions */
           for (int i = 0; i < global_scope->num_statements; ++i) {
             StatementAST* stmt = global_scope->statements[i];
             if (stmt->type == FUNCTION_DECLARATION_STMT) {
@@ -2664,61 +2649,54 @@ int main(int argc, char const *argv[]) {
               }
             }
           }
-        }
 
-        /* TODO: check signature of main */
-        print(tail, "int main(int argc, const char* argv[]) {\n\t$f();\n};\n", jai_main);
-        arrayFree(&mains);
+          /* TODO: check signature of main */
+          print(tail, "int main(int argc, const char* argv[]) {\n\t$f();\n};\n", jai_main);
+          arrayFree(&mains);
 
-        {
-          char buf[256];
-          FILE* output = fopen("/tmp/output.c", "w");
+          {
+            char buf[256];
+            FILE* output = fopen("/tmp/output.c", "w");
 
-          if (output) {
+            if (output) {
 
-            /* write header */
-            fprintf(output, "\n\n/*** HEADER ***/\n\n");
-            rewind(header);
-            while (1) {
-              int read = fread(buf, 1, 256, header);
-              fwrite(buf, read, 1, output);
-              if (feof(header)) break;
+              /* write header */
+              fprintf(output, "\n\n/*** HEADER ***/\n\n");
+              rewind(header);
+              while (1) {
+                int read = fread(buf, 1, 256, header);
+                fwrite(buf, read, 1, output);
+                if (feof(header)) break;
+              }
+              fclose(header);
+
+              /* write body */
+              fprintf(output, "\n\n/*** DEFINITIONS ***/\n\n");
+              rewind(body);
+              while (1) {
+                int read = fread(buf, 1, 256, body);
+                fwrite(buf, read, 1, output);
+                if (feof(body)) break;
+              }
+              fclose(body);
+
+              /* write tail */
+              rewind(tail);
+              while (1) {
+                int read = fread(buf, 1, 256, tail);
+                fwrite(buf, read, 1, output);
+                if (feof(tail)) break;
+              }
+              fclose(tail);
+            } else {
+              logError("Could not open output file '/tmp/output.c'\n");
             }
-            fclose(header);
 
-            /* write body */
-            fprintf(output, "\n\n/*** DEFINITIONS ***/\n\n");
-            rewind(body);
-            while (1) {
-              int read = fread(buf, 1, 256, body);
-              fwrite(buf, read, 1, output);
-              if (feof(body)) break;
-            }
-            fclose(body);
-
-            /* write tail */
-            rewind(tail);
-            while (1) {
-              int read = fread(buf, 1, 256, tail);
-              fwrite(buf, read, 1, output);
-              if (feof(tail)) break;
-            }
-            fclose(tail);
-          } else {
-            logError("Could not open output file '/tmp/output.c'\n");
           }
-
-        }
-      } else {
-        logError("Failed to open temp files\n");
-      }
-    }
-    else if (arrayCount(&mains) > 1) {
-      logError("only one main can be defined :O");
-    }
-    else {
-      logError("No main function declared\n");
-    }
+        } else {logError("Failed to open temp files\n"); }
+      } else {logErrorAt(jai_main->stmt.pos, "main must not take any arguments");}
+    } else if (arrayCount(&mains) > 1) {logError("Only one main can be defined"); }
+    else {logError("No main function declared\n"); }
   }
   return 0;
 }

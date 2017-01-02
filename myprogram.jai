@@ -16,17 +16,17 @@ var10 := overfun(3, 3.0)
 // var7 := vec2{x = 3, y = 5}
 
 // some functions
-fn fun1(a:int, b:float, c:int) -> int {/*this is a function body*/ }
-fn fun2(a:float, b:int) -> int {/*this is a function body*/}
-fn fun3(a:vec2, b:compound) -> vec2 { fun2(0.1, 3); }
+fn fun1(a:int, b:float, c:int) : int {/*this is a function body*/ }
+fn fun2(a:float, b:int) : int {/*this is a function body*/}
+fn fun3(a:vec2, b:compound) : vec2 { fun2(0.1, 3); }
 fn fun4() {}
-fn add(a:int, b:int)->int {
+fn add(a:int, b:int):int {
   return a + b;
 }
 
 // some foreign (C) functions
-fn putchar(a:int) -> int #foreign
-fn rand() -> int #foreign
+fn putchar(a:int) : int #foreign
+fn rand() : int #foreign
 
 // function overloading is OK
 fn overfun(a: vec2) {};
@@ -80,7 +80,7 @@ type Monster {
   weapon: Weapon
 }
 
-fn newRichMonster() -> Monster {
+fn newRichMonster() : Monster {
   some_gold := 300
   more_gold := (2 * 2300) + 300
   return {gold = some_gold + more_gold*2}
@@ -88,7 +88,7 @@ fn newRichMonster() -> Monster {
 
 // should not compile
 /*
-fn should_not_compile() -> int {
+fn should_not_compile() : int {
   // variable not declared!
   putchar(a)
   a := 3

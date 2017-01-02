@@ -14,6 +14,7 @@
  * function pointers
 
 # Low
+ * send in arguments to main
  * check if all code paths have return statements
  * check for duplicate function overloads
  * check for unused variables
