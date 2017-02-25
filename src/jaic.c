@@ -31,6 +31,7 @@ typedef enum {
   TOK_DOUBLEDOT = -10,
   TOK_RETURN = -11,
   TOK_FN = -12,
+  TOK_VAR = -13,
 } Token;
 
 /* values set by the tokenizer */
@@ -173,6 +174,8 @@ static int gettok() {
         return TOK_RETURN;
       } else if (strcmp(identifierStr, "fn") == 0) {
         return TOK_FN;
+      } else if (strcmp(identifierStr, "var") == 0) {
+        return TOK_VAR;
       } else {
         return TOK_IDENTIFIER;
       }
@@ -626,7 +629,7 @@ typedef enum IdentifierType {
 /** 1st pass: Parsing **/
 
 static StatementAST* parseStatement();
-static void parseType(TypeAST*);
+static bool parseType(TypeAST*);
 
 static int parseBlock(CompoundStatementAST* result, DynArray* prefix) {
   if (token != '{') {
@@ -900,7 +903,7 @@ static ExpressionAST* parseExpression() {
   return expr;
 }
 
-static void parseType(TypeAST* result) {
+static bool parseType(TypeAST* result) {
   bool partial_success = false;
 
   DynArray partial_types;
@@ -939,9 +942,7 @@ static void parseType(TypeAST* result) {
     }
 
     arrayFree(&partial_types);
-    result->num_partial_types = 0;
-    result->partial_types = 0;
-    return;
+    return false;
   }
 
   if (token == TOK_IDENTIFIER) {
@@ -951,9 +952,7 @@ static void parseType(TypeAST* result) {
     if (partial_success) {
       logErrorAt(prev_pos, "Expected type name\n");
     }
-    result->num_partial_types = 0;
-    result->partial_types = 0;
-    return;
+    return false;
   }
 
   if (arrayCount(&partial_types)) {
@@ -962,7 +961,7 @@ static void parseType(TypeAST* result) {
   }
   arrayFree(&partial_types);
 
-  return;
+  return true;
 }
 
 static StatementAST* _parseStatement() {
@@ -1087,9 +1086,8 @@ static StatementAST* _parseStatement() {
 
             if (token == ':') {
               eatToken();
-              parseType(&arg->type_ast);
 
-              if (!arg->type_ast.num_partial_types) {
+              if (parseType(&arg->type_ast)) {
                 logDebugInfo(" - with type %s\n", print_type_ast_name(arg->type_ast));
                 /* TODO: default parameters */
 
@@ -1114,7 +1112,9 @@ static StatementAST* _parseStatement() {
         /* return value */
         if (token == ':') {
           eatToken();
-          parseType(&fun->return_type_ast);
+          if (!parseType(&fun->return_type_ast)) {
+            logErrorAt(prev_pos, "Expected type after ':'");
+          };
         } else {
           fun->return_type_ast = void_type_ast;
         }
@@ -1193,9 +1193,8 @@ static StatementAST* _parseStatement() {
             eatToken();
             if (token == ':') {
               eatToken();
-              parseType(&member->type_ast);
               /* TODO: parse default value */
-              if (member->type_ast.name) {
+              if (parseType(&member->type_ast)) {
                 if (token == '}') {
                   eatToken();
                   break;
@@ -1222,42 +1221,49 @@ static StatementAST* _parseStatement() {
     return 0;
   }
 
-  else {
-    ExpressionAST* expr = parseExpression();
-    if (expr) {
-      /* Variable declaration? */
-      if (expr->expr_type == VARIABLE_GET_EXPR && token == ':') {
-        VariableGetAST* lhs;
-        VariableDeclarationAST* var;
-        lhs = (VariableGetAST*) expr;
-        var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
-        var->stmt.type = VARIABLE_DECLARATION_STMT;
-        var->stmt.pos = pos_of_identifier;
-        var->name = lhs->name;
+  /* Variable declaration? */
+  else if (token == TOK_VAR) {
+    eatToken();
+    if (token == TOK_IDENTIFIER) {
+      VariableDeclarationAST* var;
+
+      var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
+      var->stmt.type = VARIABLE_DECLARATION_STMT;
+      var->stmt.pos = prev_pos;
+      var->name = arenaPushString(&perm_arena, identifierStr);
+      eatToken();
+
+      // type?
+      if (token == ':') {
         eatToken();
-
-        parseType(&var->type_ast);
-
-        if (var->type_ast.name) {
-          if (token != '=') {
-            return &var->stmt;
-          }
+        if (!parseType(&var->type_ast)) {
+          logErrorAt(prev_pos, "Expected type after ':'\n");
+          return 0;
         }
+      }
 
-        if (token == '=') {
-          eatToken();
-          var->value = parseExpression();
-          if (var->value) {
-            logDebugInfo("Found a variable declaration for %s with declared type '%s' and a value of type %i\n", var->name, print_type_ast_name(var->type_ast), var->value->expr_type);
-            return &var->stmt;
-          }
-        }
+      // assignment?
+      if (token == '=') {
+        eatToken();
+        var->value = parseExpression();
+      }
 
+      // if no assignment, was there at least a type declaration?
+      if (!var->value && !var->type_ast.name) {
+        logErrorAt(prev_pos, "Can't infer type of variable. Need type declaration or initial value");
         return 0;
       }
 
+      return &var->stmt;
+
+    } else {logErrorAt(prev_pos, "Expected variable name, got token %s", print_token());}
+  }
+
+  else {
+    ExpressionAST* expr = parseExpression();
+    if (expr) {
       /* assignment? */
-      else if (token == '=') {
+      if (token == '=') {
         eatToken();
         AssignmentAST* ass = arenaPush(&perm_arena, sizeof(AssignmentAST));
         ass->stmt.type = ASSIGNMENT_STMT;
@@ -1279,11 +1285,9 @@ static StatementAST* _parseStatement() {
         return &expr->stmt;
       }
 
-      logErrorAt(prev_pos, "Unexpected token %s after ':'\n", print_token());
       return 0;
     } else {logErrorAt(pos_of_identifier, "Failed to parse statement\n"); }
   }
-
   return 0;
 }
 static StatementAST* parseStatement() {
@@ -1523,11 +1527,6 @@ static DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope)
 static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope);
 
 /* TODO: not int, but size_t */
-static VariableDeclarationAST _it_index_declaration = {
-  .name = "it_index",
-  .type_ast = {.name = "int"},
-  .type = &builtin_types[INT_TYPE]
-};
 static VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatementAST* scope) {
   while (scope) {
     /* check loop implicit variables */
@@ -1757,7 +1756,7 @@ static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Compou
       VariableDeclarationAST* var = getVariableDeclaration(var_ref->name, scope);
       if (var) {
         expr->type = var->type;
-      } else {logErrorAt(var_ref->expr.stmt.pos, "Use of undeclared variable '%s'", var_ref->name);}
+      } else {logErrorAt(var_ref->expr.stmt.pos, "Use of undeclared variable '%s'\n", var_ref->name);}
     } break;
 
     case MEMBER_ACCESS_EXPR: {
@@ -2005,49 +2004,54 @@ static void print(FILE* file, char* fmt, ...) {
 
         case 't': {
           Type* type = va_arg(args, Type*);
-          while (1) {
-            Type* next = 0;
-            switch (type->type) {
-              case UNKNOWN_TYPE:
-              case VOID_TYPE: fprintf(file, "void"); break;
-              case INT_TYPE: fprintf(file, "int"); break;
-              case FLOAT_TYPE: fprintf(file, "float"); break;
-              case F32_TYPE: fprintf(file, "f32"); break;
-              case F64_TYPE: fprintf(file, "f64"); break;
-              case U8_TYPE: fprintf(file, "u8"); break;
-              case U16_TYPE: fprintf(file, "u16"); break;
-              case U32_TYPE:  fprintf(file, "u32");break;
-              case U64_TYPE:  fprintf(file, "u64");break;
-              case I8_TYPE: fprintf(file, "i8"); break;
-              case I16_TYPE: fprintf(file, "i16"); break;
-              case I32_TYPE:  fprintf(file, "i32");break;
-              case I64_TYPE:  fprintf(file, "i64");break;
-              case USIZE_TYPE: fprintf(file, "usize"); break;
-              case STRUCT_TYPE: fprintf(file, "%s", ((StructType*) type)->name); break;
-              case ARRAY_TYPE: {
-                fprintf(file, "[]");
-                next = ((ArrayType*) type)->base_type;
-              }; break;
-              case STATIC_ARRAY_TYPE: {
-                fprintf(file, "[%i]", ((StaticArrayType*) type)->size);
-                next = ((StaticArrayType*) type)->arr.base_type;
-              }; break;
-              case POINTER_TYPE: {
-                fprintf(file, "^");
-                next = ((PointerType*) type)->base_type;
-              }; break;
-              case FUNCTION_TYPE: fprintf(file, "<function pointer>"); break;
+          if (type) {
+            while (1) {
+              Type* next = 0;
+              switch (type->type) {
+                case UNKNOWN_TYPE:
+                case VOID_TYPE: fprintf(file, "void"); break;
+                case INT_TYPE: fprintf(file, "int"); break;
+                case FLOAT_TYPE: fprintf(file, "float"); break;
+                case F32_TYPE: fprintf(file, "f32"); break;
+                case F64_TYPE: fprintf(file, "f64"); break;
+                case U8_TYPE: fprintf(file, "u8"); break;
+                case U16_TYPE: fprintf(file, "u16"); break;
+                case U32_TYPE:  fprintf(file, "u32");break;
+                case U64_TYPE:  fprintf(file, "u64");break;
+                case I8_TYPE: fprintf(file, "i8"); break;
+                case I16_TYPE: fprintf(file, "i16"); break;
+                case I32_TYPE:  fprintf(file, "i32");break;
+                case I64_TYPE:  fprintf(file, "i64");break;
+                case USIZE_TYPE: fprintf(file, "usize"); break;
+                case STRUCT_TYPE: fprintf(file, "%s", ((StructType*) type)->name); break;
+                case ARRAY_TYPE: {
+                  fprintf(file, "[]");
+                  next = ((ArrayType*) type)->base_type;
+                }; break;
+                case STATIC_ARRAY_TYPE: {
+                  fprintf(file, "[%i]", ((StaticArrayType*) type)->size);
+                  next = ((StaticArrayType*) type)->arr.base_type;
+                }; break;
+                case POINTER_TYPE: {
+                  fprintf(file, "^");
+                  next = ((PointerType*) type)->base_type;
+                }; break;
+                case FUNCTION_TYPE: fprintf(file, "<function pointer>"); break;
+              }
+              if (next) {
+                type = next;
+              } else {
+                break;
+              }
             }
-            if (next) {
-              type = next;
-            } else {
-              break;
-            }
+          } else {
+            fprintf(file, "<unknown>");
           }
         }; break;
 
         case 'T': {
           Type* type = va_arg(args, Type*);
+          /* ^[20][16]^[8]int -> int *(*(*s)[20][16])[8] */
           if (type->type == POINTER_TYPE) {
             fputs("T_void*", file);
           } else if (type->type == ARRAY_TYPE) {
@@ -2147,7 +2151,7 @@ static void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArra
   }
 }
 
-static void compile_expression_to_c(ExpressionAST* expr, Type* cast, FILE* body) {
+static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
   switch (expr->expr_type) {
     case UNKNOWN_EXPR: assert(false); break;
 
@@ -2171,7 +2175,7 @@ static void compile_expression_to_c(ExpressionAST* expr, Type* cast, FILE* body)
 
     case ARRAY_SUBSCRIPT_EXPR: {
       ArraySubscriptAST* as = (ArraySubscriptAST*) expr;
-      print(body, "(($T) ", as->base->type);
+      print(body, "(", as->base->type);
       compile_expression_to_c(as->base, body);
       fprintf(body, ")[");
       compile_expression_to_c(as->subscript, body);
@@ -2223,7 +2227,6 @@ static void compile_expression_to_c(ExpressionAST* expr, Type* cast, FILE* body)
     } break;
   }
 }
-
 
 static void _get_member_access_chain(String* res, ExpressionAST* expr) {
   if (expr->expr_type == VARIABLE_GET_EXPR) {
@@ -2463,6 +2466,13 @@ static void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
   fprintf(file, "\n};\n");
 }
 
+/** Compile AST to LLVM */
+/*
+static void compile_to_llvm() {
+  UNIMPLEMENTED;
+}
+*/
+
 /** Main **/
 
 int main(int argc, char const *argv[]) {
@@ -2694,7 +2704,7 @@ int main(int argc, char const *argv[]) {
 
           }
         } else {logError("Failed to open temp files\n"); }
-      } else {logErrorAt(jai_main->stmt.pos, "main must not take any arguments");}
+      } else {logErrorAt(jai_main->body.stmt.pos, "main must not take any arguments");}
     } else if (arrayCount(&mains) > 1) {logError("Only one main can be defined"); }
     else {logError("No main function declared\n"); }
   }

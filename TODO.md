@@ -7,11 +7,14 @@
  * operator precedence
  * Type identifier for struct initializer
  * Multiple return values
- * (strongly and loosly typed) enums and (auto-breaking! :D) switch statement
+ * (strongly and loosly typed) enums
+ * (auto-breaking! :D) case (switch) statement
+ * arrays of <enum> size
  * default function parameters
  * UFC
  * parse negative values
  * function pointers
+ * any type
 
 # Low
  * send in arguments to main

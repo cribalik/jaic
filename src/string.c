@@ -7,15 +7,6 @@ typedef struct String {
   DynArray chars;
 } String;
 
-static int stringAppend(String* a, char* b);
-static void stringInit(String* s, char* c) {
-  arrayInit(&s->chars, 1, 1);
-  *(char*)arrayPush(&s->chars) = 0;
-  if (c) {
-    stringAppend(s, c);
-  }
-}
-
 static int stringAppend(String* a, char* b) {
   assert(a->chars.count > 0);
   int len = strlen(b);
@@ -24,6 +15,14 @@ static int stringAppend(String* a, char* b) {
   memcpy(next, b, len);
   next[len] = 0;
   return len;
+}
+
+static void stringInit(String* s, char* c) {
+  arrayInit(&s->chars, 1, 1);
+  *(char*)arrayPush(&s->chars) = 0;
+  if (c) {
+    stringAppend(s, c);
+  }
 }
 
 static int stringPrepend(String* a, char* b) {
