@@ -7,17 +7,19 @@ typedef struct String {
   DynArray chars;
 } String;
 
-static int stringAppend(String* a, char* b) {
+internal int stringAppend(String* a, char* b) {
+  int len;
+  char* next;
   assert(a->chars.count > 0);
-  int len = strlen(b);
-  char* next = arrayPushN(&a->chars, len);
+  len = strlen(b);
+  next = arrayPushN(&a->chars, len);
   --next;
   memcpy(next, b, len);
   next[len] = 0;
   return len;
 }
 
-static void stringInit(String* s, char* c) {
+internal void stringInit(String* s, char* c) {
   arrayInit(&s->chars, 1, 1);
   *(char*)arrayPush(&s->chars) = 0;
   if (c) {
@@ -25,11 +27,13 @@ static void stringInit(String* s, char* c) {
   }
 }
 
-static int stringPrepend(String* a, char* b) {
+internal int stringPrepend(String* a, char* b) {
+  int len;
+  char* next;
   assert(a->chars.count > 0);
-  int len = strlen(b);
+  len = strlen(b);
   /* move current string to end */
-  char* next = arrayPushN(&a->chars, len);
+  next = arrayPushN(&a->chars, len);
   --next;
   memmove(next, a->chars.data, a->chars.count - 1);
   *(char*)arrayLast(&a->chars) = 0;
@@ -42,27 +46,27 @@ static int stringPrepend(String* a, char* b) {
   return len;
 }
 
-static void stringPop(String* s, int n) {
+internal void stringPop(String* s, int n) {
   assert(s->chars.count > n);
   arrayPopN(&s->chars, n);
   *(char*)arrayLast(&s->chars) = 0;
 }
 
-static char* stringGet(String* s) {
+internal char* stringGet(String* s) {
   return arrayBegin(&s->chars);
 }
 
-static char* stringClear(String* s) {
+internal char* stringClear(String* s) {
   s->chars.count = 1;
   *(char*)arrayLast(&s->chars) = 0;
   return s->chars.data;
 }
 
-static void stringFree(String* s) {
+internal void stringFree(String* s) {
   arrayFree(&s->chars);
 }
 
-static void stringAppendChar(String* s, char c) {
+internal void stringAppendChar(String* s, char c) {
   char* p = arrayPush(&s->chars);
   p[-1] = c;
   *p = 0;

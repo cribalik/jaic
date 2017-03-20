@@ -5,9 +5,9 @@
 #include <string.h>
 #include <assert.h>
 
-typedef char byte;
+#define internal static
 
-typedef struct Array {
+typedef struct {
   int count;
   void* data;
 } Array;
@@ -17,7 +17,7 @@ typedef struct {
   void* data;
 } DynArray;
 
-static void arrayInit(DynArray* arr, int capacity, int item_size) {
+internal void arrayInit(DynArray* arr, int capacity, int item_size) {
   arr->data = 0;
   arr->count = 0;
   arr->capacity = capacity;
@@ -27,7 +27,7 @@ static void arrayInit(DynArray* arr, int capacity, int item_size) {
   }
 }
 
-static void* arrayPush(DynArray* arr) {
+internal void* arrayPush(DynArray* arr) {
   if (!arr->data) {
     arr->data = calloc(arr->item_size, 4);
     arr->capacity = 4;
@@ -38,10 +38,10 @@ static void* arrayPush(DynArray* arr) {
   }
 
   ++arr->count;
-  return ((byte*) arr->data) + (arr->item_size * (arr->count - 1));
+  return ((char*) arr->data) + (arr->item_size * (arr->count - 1));
 }
 
-static void* arrayPushN(DynArray* arr, int n) {
+internal void* arrayPushN(DynArray* arr, int n) {
   if (!arr->data) {
     int size = n > 4 ? n : 4;
     arr->data = calloc(arr->item_size, size);
@@ -53,74 +53,76 @@ static void* arrayPushN(DynArray* arr, int n) {
   }
 
   arr->count += n;
-  return ((byte*) arr->data) + (arr->item_size * (arr->count - n));
+  return ((char*) arr->data) + (arr->item_size * (arr->count - n));
 }
 
-static void* arrayLast(DynArray* arr) {
-  return arr->data + (arr->count - 1) * arr->item_size;
+internal void* arrayLast(DynArray* arr) {
+  return ((char*) arr->data) + (arr->count - 1) * arr->item_size;
 }
 
-static void* arrayPushVal(DynArray* arr, void* in) {
+internal void* arrayPushVal(DynArray* arr, void* in) {
   void* r = arrayPush(arr);
   memcpy(r, in, arr->item_size);
   return arrayLast(arr);
 }
 
-static void* arrayBegin(DynArray* arr) {
+internal void* arrayBegin(DynArray* arr) {
   return arr->data;
 }
 
-static void* arrayEnd(DynArray* arr) {
-  return arr->data + (arr->count * arr->item_size);
+internal void* arrayEnd(DynArray* arr) {
+  return ((char*) arr->data) + (arr->count * arr->item_size);
 }
 
-static void* arrayGet(DynArray* arr, int i) {
-  return ((byte*) arr->data) + (arr->item_size * i);
+internal void* arrayGet(DynArray* arr, int i) {
+  return ((char*) arr->data) + (arr->item_size * i);
 }
 
-static void arrayPop(DynArray* arr) {
+internal void arrayPop(DynArray* arr) {
   assert(arr->count > 0);
   --arr->count;
 }
 
-static void arrayPopN(DynArray* arr, int n) {
+internal void arrayPopN(DynArray* arr, int n) {
   assert(arr->count >= n);
   arr->count -= n;
 }
 
-static int arrayCount(DynArray* arr) {
+internal int arrayCount(DynArray* arr) {
   return arr->count;
 }
 #define arraySize arrayCount
 
-static void arrayGetData(DynArray* arr, void** data, int* size) {
+internal void arrayGetData(DynArray* arr, void** data, int* size) {
   *data = arr->data;
   *size = arr->count * arr->item_size;
 }
 
-static int arrayCapacity(DynArray* arr) {
+internal int arrayCapacity(DynArray* arr) {
   return arr->capacity;
 }
 
-static void arrayFree(DynArray* arr) {
+internal void arrayFree(DynArray* arr) {
   free(arr->data);
   arr->capacity = 0;
   arr->data = 0;
   arr->count = 0;
 }
 /*
-static void arrayFree(DynArray* arr) {
+internal void arrayFree(DynArray* arr) {
   free(arr->data);
 }
 */
 
-static Array arrayToArray(DynArray* arr) {
-  Array result = {.count = arr->count, .data = arr->data};
+internal Array arrayToArray(DynArray* arr) {
+  Array result;
+  result.count = arr->count;
+  result.data = arr->data;
   return result;
 }
 
 #ifdef DEBUG
-static void arrayTest() {
+internal void arrayTest() {
 
   {
     DynArray a;
