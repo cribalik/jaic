@@ -17,17 +17,19 @@ typedef struct {
   void* data;
 } DynArray;
 
-internal void arrayInit(DynArray* arr, int capacity, int item_size) {
-  arr->data = 0;
-  arr->count = 0;
-  arr->capacity = capacity;
-  arr->item_size = item_size;
-  if (arr->capacity) {
-    arr->data = calloc(arr->item_size, capacity);
+internal DynArray array_create(int capacity, int item_size) {
+  DynArray result;
+  result.data = 0;
+  result.count = 0;
+  result.capacity = capacity;
+  result.item_size = item_size;
+  if (capacity) {
+    result.data = calloc(item_size, capacity);
   }
+  return result;
 }
 
-internal void* arrayPush(DynArray* arr) {
+internal void* array_push(DynArray* arr) {
   if (!arr->data) {
     arr->data = calloc(arr->item_size, 4);
     arr->capacity = 4;
@@ -41,7 +43,7 @@ internal void* arrayPush(DynArray* arr) {
   return ((char*) arr->data) + (arr->item_size * (arr->count - 1));
 }
 
-internal void* arrayPushN(DynArray* arr, int n) {
+internal void* array_pushN(DynArray* arr, int n) {
   if (!arr->data) {
     int size = n > 4 ? n : 4;
     arr->data = calloc(arr->item_size, size);
@@ -60,8 +62,8 @@ internal void* arrayLast(DynArray* arr) {
   return ((char*) arr->data) + (arr->count - 1) * arr->item_size;
 }
 
-internal void* arrayPushVal(DynArray* arr, void* in) {
-  void* r = arrayPush(arr);
+internal void* array_pushVal(DynArray* arr, void* in) {
+  void* r = array_push(arr);
   memcpy(r, in, arr->item_size);
   return arrayLast(arr);
 }
@@ -114,7 +116,7 @@ internal void arrayFree(DynArray* arr) {
 }
 */
 
-internal Array arrayToArray(DynArray* arr) {
+internal Array array_to_array(DynArray* arr) {
   Array result;
   result.count = arr->count;
   result.data = arr->data;
@@ -126,14 +128,14 @@ internal void arrayTest() {
 
   {
     DynArray a;
-    arrayInit(&a, 30, sizeof(int));
+    a = array_create(30, sizeof(int));
     assert(arrayCount(&a) == 0);
     assert(arrayCapacity(&a) == 30);
-    *(int*)arrayPush(&a) = 100;
+    *(int*)array_push(&a) = 100;
     assert(arrayCount(&a) == 1);
     assert(arrayCapacity(&a) == 30);
     assert(*(int*)arrayGet(&a, 0) == 100);
-    *(int*)arrayPush(&a) = 202;
+    *(int*)array_push(&a) = 202;
     assert(arrayCount(&a) == 2);
     assert(arrayCapacity(&a) == 30);
     assert(*(int*)arrayGet(&a, 0) == 100);
@@ -146,19 +148,19 @@ internal void arrayTest() {
 
   {
     DynArray a;
-    arrayInit(&a, 0, sizeof(int));
+    a = array_create(0, sizeof(int));
     assert(arrayCount(&a) == 0);
     assert(arrayCapacity(&a) == 0);
-    arrayPush(&a);
+    array_push(&a);
     assert(arrayCount(&a) == 1);
     assert(arrayCapacity(&a) == 4);
-    arrayPush(&a);
+    array_push(&a);
     assert(arrayCount(&a) == 2);
     assert(arrayCapacity(&a) == 4);
-    arrayPush(&a);
+    array_push(&a);
     assert(arrayCount(&a) == 3);
     assert(arrayCapacity(&a) == 4);
-    arrayPush(&a);
+    array_push(&a);
     assert(arrayCount(&a) == 4);
     assert(arrayCapacity(&a) == 8);
     arrayFree(&a);

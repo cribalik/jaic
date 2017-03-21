@@ -1,8 +1,9 @@
-#define DEBUG
+#define DEBUG 1
 
 #include <stdio.h>
 #include "common.c"
-internal void print(FILE* file, char* str, ...);
+internal void print(FILE* file, char* fmt, ...);
+internal void vprint(FILE* file, char* fmt, va_list args);
 #include "terminal.c"
 #include "memarena.c"
 #include "array.c"
@@ -13,11 +14,133 @@ internal void print(FILE* file, char* str, ...);
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>
-#include <stdarg.h>
 
 #ifdef LINUX
   #include <unistd.h>
 #endif
+
+/* Logging */
+
+void printLine(FILE* out, char* filename, int line, int column) {
+  FILE* file;
+  int i = 1;
+  char c;
+
+  /* TODO: send in the file position instead so we don't need to parse the whole file? it's okay if this is slow though */
+  if (!filename) {
+    return;
+  }
+
+  file = fopen(filename, "r");
+  for (i = 1; i < line;) {
+    i += getc(file) == '\n';
+  }
+
+  fflush(out);
+  c = getc(file);
+  while (c != EOF && c != '\n') {
+    putc(c, out);
+    c = getc(file);
+  }
+  putc('\n', out);
+  for (i = 0; i < column-1; ++i) {
+    putc(' ', out);
+  }
+  putc('^', out);
+  putc('\n', out);
+  fflush(out);
+}
+
+/* Some macros */
+
+#if defined(_MSC_VER)
+  extern void __cdecl __debugbreak(void);
+  #define trigger_breakpoint() __debugbreak()
+#else
+  #include <signal.h>
+  #define trigger_breakpoint() raise(SIGTRAP)
+#endif
+
+#define UNIMPLEMENTED do {fprintf(stderr, "Unimplemented function at %s:%d\n", __FILE__, __LINE__); trigger_breakpoint(); exit(1);} while(0)
+#define UNREACHABLE do {fprintf(stderr, "Unreachable\n"); trigger_breakpoint(); exit(1);} while(0)
+#define LOG_AND_DIE(msg) do {fputs(msg, stderr); trigger_breakpoint(); exit(1);} while(0)
+
+global bool found_error = false;
+
+/* Example: 
+ * jai_log_at(ERROR, "value was %i", 3);
+ * jai_log_at(DEBUG_INFO, "value was %i, that makes me %s", 5, happy ? "happy" : "sad");
+ */
+#define ERROR _LOG_USER_ERROR,__FILE__,__LINE__
+#define NOTE _LOG_USER_INFO,__FILE__,__LINE__
+#define DEBUG_INFO _LOG_DEBUG_INFO,__FILE__,__LINE__
+#define DEBUG_ERROR _LOG_DEBUG_ERROR,__FILE__,__LINE__
+typedef enum {
+  _LOG_USER_ERROR,
+  _LOG_USER_INFO,
+  _LOG_DEBUG_INFO,
+  _LOG_DEBUG_ERROR
+} _LogType;
+internal void jai_log_at(_LogType type, char* file, int line, FilePos filepos, char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  switch (type) {
+    case _LOG_USER_ERROR: {
+      fprintf(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, RED, RESET_COLOR, RESET_FORMAT);
+      vprint(stderr, fmt, args);
+      printLine(stderr, filepos.file, filepos.line, filepos.column);
+      found_error = true;
+    } break;
+    case _LOG_USER_INFO: {
+      fprintf(stderr, "%s%s:%i:%i (%s:%i): %snote:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, GREEN, RESET_COLOR, RESET_FORMAT);
+      vprint(stderr, fmt, args);
+      printLine(stderr, filepos.file, filepos.line, filepos.column);
+    } break;
+    case _LOG_DEBUG_INFO: {
+      if (DEBUG) {
+        fprintf(stderr, "%s%s:%i:%i (%s:%i): %sdebug:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, GREEN, RESET_COLOR, RESET_FORMAT);
+        printLine(stderr, filepos.file, filepos.line, filepos.column);
+        vprint(stderr, fmt, args);
+      }
+    } break;
+    case _LOG_DEBUG_ERROR: {
+      if (DEBUG) {
+        fprintf(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, RED, RESET_COLOR, RESET_FORMAT);
+        vprint(stderr, fmt, args);
+        printLine(stderr, filepos.file, filepos.line, filepos.column);
+      }
+    } break;
+  }
+  va_end(args);
+}
+internal void jai_log(_LogType type, char* file, int line, char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  switch (type) {
+    case _LOG_DEBUG_INFO: {
+      if (DEBUG) {
+        fprintf(stderr, "%s%s:%i: %sdebug:%s%s ", BOLD, file, line, GREEN, RESET_COLOR, RESET_FORMAT);
+        vprint(stderr, fmt, args);
+      }
+    } break;
+    case _LOG_DEBUG_ERROR: {
+      if (DEBUG) {
+        fprintf(stderr, "%s%s:%i: %serror:%s%s ", BOLD, file, line, RED, RESET_COLOR, RESET_FORMAT);
+        vprint(stderr, fmt, args);
+      }
+    } break;
+    case _LOG_USER_INFO: {
+      fprintf(stderr, "%s%snote:%s%s ", BOLD, GREEN, RESET_COLOR, RESET_FORMAT);
+      vprint(stderr, fmt, args);
+    } break;
+    case _LOG_USER_ERROR: {
+      fprintf(stderr, "%s%serror:%s%s ", BOLD, RED, RESET_COLOR, RESET_FORMAT);
+      vprint(stderr, fmt, args);
+    } break;
+    default: UNREACHABLE;
+  }
+  va_end(args);
+}
 
 typedef enum {
   TOK_EOF = -1,
@@ -39,8 +162,6 @@ global char* identifierStr;
 global double floatVal;
 global int intVal;
 
-global bool found_error = false;
-
 /* the input source file */
 global FILE* file;
 
@@ -52,10 +173,10 @@ global MemArena perm_arena;
   FilePos _position = prev_pos; \
   fgetpos(file, &_position.fpos); \
   int _num_chars_last_read = num_chars_last_read; \
-  logDebugInfo("Pushing %s:%i:%i %c\n", _position.file, _position.line, _position.column-1, curr_char);
+  jai_log(DEBUG_INFO, "Pushing %s:%i:%i %c\n", _position.file, _position.line, _position.column-1, curr_char);
 
 #define popPosition \
-  logDebugInfo("Jumping back to %s:%i:%i %c\n", prev_pos.file, prev_pos.line, prev_pos.column-1, curr_char); \
+  jai_log(DEBUG_INFO, "Jumping back to %s:%i:%i %c\n", prev_pos.file, prev_pos.line, prev_pos.column-1, curr_char); \
   fsetpos(file, &_position.fpos); \
   fseek(file, -_num_chars_last_read - 1, SEEK_CUR); \
   next_pos = _position; \
@@ -63,16 +184,10 @@ global MemArena perm_arena;
   eatToken();
 
 #define pushState \
-  void* _arena_current = arenaGetCurrent(perm_arena);
+  void* _arena_current = arena_pos(perm_arena);
 #define popState \
-  arenaPopTo(&perm_arena, _arena_current);
+  arena_pop_to(&perm_arena, _arena_current);
 
-typedef struct {
-  char* file;
-  int line;
-  int column;
-  fpos_t fpos;
-} FilePos;
 global FilePos prev_pos;
 global FilePos next_pos;
 
@@ -81,7 +196,7 @@ global FilePos next_pos;
 global int num_chars_read = 0;
 internal char getChar(FILE* file) {
   char c = getc(file);
-  /* logDebugInfo("%i: %c\n", num_chars_read, c); */
+  /* jai_log(DEBUG_INFO, "%i: %c\n", num_chars_read, c); */
   ++num_chars_read;
   ++next_pos.column;
   if (c == '\n') {
@@ -191,7 +306,7 @@ internal int gettok() {
     }
 
     if (i == BUFFER_SIZE) {
-      logErrorAt(prev_pos, "Reached max size for int\n");
+      jai_log_at(ERROR, prev_pos, "Reached max size for int\n");
     }
     else if (curr_char == '.') {
       buf[i++] = '.';
@@ -203,7 +318,7 @@ internal int gettok() {
         }
 
         if (i == BUFFER_SIZE) {
-          logErrorAt(prev_pos, "Reached max size for float number\n");
+          jai_log_at(ERROR, prev_pos, "Reached max size for float number\n");
         }
         /* TODO: check for suffixes here e.g. 30.0f */
         else {
@@ -212,7 +327,7 @@ internal int gettok() {
           return TOK_FLOAT;
         }
       } else {
-        logErrorAt(prev_pos, "Unexpected character '%c', expected floating point number or '..'\n", curr_char);
+        jai_log_at(ERROR, prev_pos, "Unexpected character '%c', expected floating point number or '..'\n", curr_char);
       }
     }
     /* TODO: check for suffixes here e.g. 10u32 */
@@ -285,12 +400,12 @@ internal char* print_token() {
 
 global int num_chars_last_read = 0;
 internal void eatToken() {
-  /* logDebugInfo("before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column); */
+  /* jai_log(DEBUG_INFO, "before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column); */
   int i = num_chars_read;
   token = gettok();
   eatWhitespace();
   num_chars_last_read = num_chars_read - i;
-  /* logDebugInfo("last read: %i token: %s\n", num_chars_last_read, print_token()); */
+  /* jai_log(DEBUG_INFO, "last read: %i token: %s\n", num_chars_last_read, print_token()); */
 }
 
 internal void goto_matching_brace() {
@@ -301,7 +416,7 @@ internal void goto_matching_brace() {
     if (token == '{') ++d;
     else if (token == '}') --d;
     else if (token == EOF) {
-      logErrorAt(pos, "No matching brace found\n");
+      jai_log_at(ERROR, pos, "No matching brace found\n");
       return;
     }
   }
@@ -582,16 +697,16 @@ internal char* print_type_ast_name(TypeAST type) {
   String res;
   int i;
   if (!type.name) return 0;
-  stringInit(&res, 0);
+  res = string_create(0);
   for (i = 0; i < type.num_partial_types; ++i) {
     switch (type.partial_types[i].class) {
-      case POINTER_TYPE_AST: stringAppendChar(&res, '^'); break;
-      case ARRAY_TYPE_AST: stringAppend(&res, "[]"); break;
-      case STATIC_ARRAY_TYPE_AST: stringAppend(&res, "[N]"); break;
+      case POINTER_TYPE_AST: string_append_char(&res, '^'); break;
+      case ARRAY_TYPE_AST: string_append(&res, "[]"); break;
+      case STATIC_ARRAY_TYPE_AST: string_append(&res, "[N]"); break;
     }
   }
-  stringAppend(&res, type.name);
-  return stringGet(&res);
+  string_append(&res, type.name);
+  return string_get(&res);
 }
 
 internal int test() {
@@ -612,7 +727,7 @@ typedef enum IdentifierType {
 internal StatementAST* parseStatement();
 internal bool parseType(TypeAST*);
 
-internal int parseBlock(CompoundStatementAST* result, DynArray* prefix) {
+internal int parse_block(CompoundStatementAST* result, DynArray* prefix) {
   DynArray statements;
   DynArray* array;
   if (token != '{') {
@@ -623,7 +738,7 @@ internal int parseBlock(CompoundStatementAST* result, DynArray* prefix) {
     array = prefix;
   } else {
     array = &statements;
-    arrayInit(array, 32, sizeof(StatementAST*));
+    *array = array_create(32, sizeof(StatementAST*));
   }
   while (1) {
     StatementAST* stmt;
@@ -633,15 +748,15 @@ internal int parseBlock(CompoundStatementAST* result, DynArray* prefix) {
     }
     stmt = parseStatement();
     if (stmt) {
-      arrayPushVal(array, &stmt);
+      array_pushVal(array, &stmt);
     } else {
-      logErrorAt(prev_pos, "Failed to parse statement\n");
+      jai_log_at(ERROR, prev_pos, "Failed to parse statement\n");
       arrayFree(array);
       return 1;
     }
   }
   result->num_statements = arrayCount(array);
-  result->statements = pushArrayToArena(array, &perm_arena);
+  result->statements = arena_push_array(array, &perm_arena);
   result->stmt.type = COMPOUND_STMT;
   arrayFree(array);
   return 0;
@@ -651,24 +766,24 @@ internal ExpressionAST* parseExpression();
 internal ExpressionAST* parsePrimitive() {
   switch (token) {
     case TOK_FLOAT: {
-      Constant* f = arenaPush(&perm_arena, sizeof(Constant));
+      Constant* f = arena_push(&perm_arena, sizeof(Constant));
       f->expr.expr_type = LITERAL_EXPR;
       f->expr.stmt.pos = prev_pos;
       f->value.float_val = floatVal;
       f->expr.type = &builtin_types[FLOAT_TYPE];
       eatToken();
-      logDebugInfo("Found a float literal with value %f\n", f->value.f32);
+      jai_log(DEBUG_INFO, "Found a float literal with value %f\n", f->value.f32);
       return &f->expr;
     } break;
 
     case TOK_INT: {
-      Constant* i = arenaPush(&perm_arena, sizeof(Constant));
+      Constant* i = arena_push(&perm_arena, sizeof(Constant));
       i->expr.expr_type = LITERAL_EXPR;
       i->expr.stmt.pos = prev_pos;
       i->value.int_val = intVal;
       i->expr.type = &builtin_types[INT_TYPE];
       eatToken();
-      logDebugInfo("Found an int literal with value %i\n", i->int_val);
+      jai_log(DEBUG_INFO, "Found an int literal with value %i\n", i->value.int_val);
       return &i->expr;
     } break;
 
@@ -676,10 +791,10 @@ internal ExpressionAST* parsePrimitive() {
       VariableGetAST* var;
       ExpressionAST* result;
 
-      var = arenaPush(&perm_arena, sizeof(VariableGetAST));
+      var = arena_push(&perm_arena, sizeof(VariableGetAST));
       var->expr.stmt.pos = prev_pos;
       var->expr.expr_type = VARIABLE_GET_EXPR;
-      var->name = arenaPushString(&perm_arena, identifierStr);
+      var->name = arena_push_string(&perm_arena, identifierStr);
       result = &var->expr;
       eatToken();
 
@@ -689,11 +804,11 @@ internal ExpressionAST* parsePrimitive() {
         if (token == '(') {
           CallAST* call;
           DynArray args;
-          call = arenaPush(&perm_arena, sizeof(CallAST));
+          call = arena_push(&perm_arena, sizeof(CallAST));
           call->expr.expr_type = CALL_EXPR;
           call->expr.stmt.pos = prev_pos;
           call->base = result;
-          arrayInit(&args, 0, sizeof(ExpressionAST*));
+          args = array_create(0, sizeof(ExpressionAST*));
           eatToken();
 
           /* get args */
@@ -706,12 +821,12 @@ internal ExpressionAST* parsePrimitive() {
 
             expr = parseExpression();
             if (!expr) {
-              logErrorAt(prev_pos, "Invalid expression inside function call\n");
+              jai_log_at(ERROR, prev_pos, "Invalid expression inside function call\n");
               arrayFree(&args);
               return 0;
             }
 
-            arrayPushVal(&args, &expr);
+            array_pushVal(&args, &expr);
 
             if (token == ')') {
               eatToken();
@@ -720,23 +835,23 @@ internal ExpressionAST* parsePrimitive() {
             if (token == ',') {
               eatToken();
             } else {
-              logErrorAt(prev_pos, "Expected ',' between function input parameters\n");
+              jai_log_at(ERROR, prev_pos, "Expected ',' between function input parameters\n");
             }
           }
 
           call->num_args = arrayCount(&args);
           if (call->num_args > 0) {
-            call->args = pushArrayToArena(&args, &perm_arena);
+            call->args = arena_push_array(&args, &perm_arena);
           }
           arrayFree(&args);
 
-          logDebugInfo("Found function call with %i inputs\n", call->num_args);
+          jai_log(DEBUG_INFO, "Found function call with %i inputs\n", call->num_args);
           result = &call->expr;
         }
         /* array element? */
         else if (token == '[') {
           ArraySubscriptAST* as;
-          as = arenaPush(&perm_arena, sizeof(ArraySubscriptAST));
+          as = arena_push(&perm_arena, sizeof(ArraySubscriptAST));
           as->expr.expr_type = ARRAY_SUBSCRIPT_EXPR;
           as->expr.stmt.pos = prev_pos;
           as->base = result;
@@ -748,11 +863,11 @@ internal ExpressionAST* parsePrimitive() {
               eatToken();
               result = &as->expr;
             } else {
-              logErrorAt(prev_pos, "Found no matching ']'\n");
+              jai_log_at(ERROR, prev_pos, "Found no matching ']'\n");
               return 0;
             }
           } else {
-            logErrorAt(prev_pos, "Failed to parse array subscript index\n");
+            jai_log_at(ERROR, prev_pos, "Failed to parse array subscript index\n");
             return 0;
           }
         }
@@ -760,15 +875,15 @@ internal ExpressionAST* parsePrimitive() {
         else if (token == '.') {
           eatToken();
           if (token == TOK_IDENTIFIER) {
-            MemberAccessAST* ast = arenaPush(&perm_arena, sizeof(MemberAccessAST));
+            MemberAccessAST* ast = arena_push(&perm_arena, sizeof(MemberAccessAST));
             ast->expr.expr_type = MEMBER_ACCESS_EXPR;
             ast->expr.stmt.pos = prev_pos;
             ast->base = result;
-            ast->name = arenaPushString(&perm_arena, identifierStr);
+            ast->name = arena_push_string(&perm_arena, identifierStr);
             result = &ast->expr;
             eatToken();
           } else {
-            logErrorAt(prev_pos, "Identifier expected after '.', instead got %s\n", print_token());
+            jai_log_at(ERROR, prev_pos, "Identifier expected after '.', instead got %s\n", print_token());
             return 0;
           }
         }
@@ -781,8 +896,9 @@ internal ExpressionAST* parsePrimitive() {
     } break;
 
     case '(': {
+      ExpressionAST* result;
       eatToken();
-      ExpressionAST* result = parseExpression();
+      result = parseExpression();
       if (!result || token != ')') {
         return 0;
       }
@@ -791,18 +907,18 @@ internal ExpressionAST* parsePrimitive() {
     } break;
 
     case '{': {
+      StructInitializationAST* ast;
       eatToken();
-      StructInitializationAST* ast = arenaPush(&perm_arena, sizeof(StructInitializationAST));
+      ast = arena_push(&perm_arena, sizeof(StructInitializationAST));
       ast->expr.expr_type = STRUCT_INIT_EXPR;
       ast->expr.stmt.pos = prev_pos;
       if (token != '}') {
-        DynArray members;
-        arrayInit(&members, 4, sizeof(MemberInitializationAST));
+        DynArray members = array_create(4, sizeof(MemberInitializationAST));
         while (1) {
-          MemberInitializationAST* member = arrayPush(&members);
+          MemberInitializationAST* member = array_push(&members);
           bool success = false;
           if (token == TOK_IDENTIFIER) {
-            member->name = arenaPushString(&perm_arena, identifierStr);
+            member->name = arena_push_string(&perm_arena, identifierStr);
             eatToken();
             if (token == '=') {
               eatToken();
@@ -815,11 +931,11 @@ internal ExpressionAST* parsePrimitive() {
                   eatToken();
                   break;
                 } else {
-                  logErrorAt(prev_pos, "Expected ',' or '}', but found %s\n", print_token());
+                  jai_log_at(ERROR, prev_pos, "Expected ',' or '}', but found %s\n", print_token());
                 }
-              } else {logErrorAt(prev_pos, "Failed to parse expression\n");}
-            } else {logErrorAt(prev_pos, "Expected '=' after member name, found %s\n", print_token());}
-          } else {logErrorAt(prev_pos, "Expected identifier, instead found %s\n", print_token());}
+              } else {jai_log_at(ERROR, prev_pos, "Failed to parse expression\n");}
+            } else {jai_log_at(ERROR, prev_pos, "Expected '=' after member name, found %s\n", print_token());}
+          } else {jai_log_at(ERROR, prev_pos, "Expected identifier, instead found %s\n", print_token());}
 
           if (!success) {
             while (token != '}') {
@@ -832,7 +948,7 @@ internal ExpressionAST* parsePrimitive() {
           /*we failed, eat everything to matching brace */
         }
         if (ast) {
-          ast->members = pushArrayToArena(&members, &perm_arena);
+          ast->members = arena_push_array(&members, &perm_arena);
           ast->num_members = arrayCount(&members);
         }
         arrayFree(&members);
@@ -847,7 +963,7 @@ internal ExpressionAST* parsePrimitive() {
     } break;
 
     default: {
-      logErrorAt(prev_pos, "Failed to parse expression\n");
+      jai_log_at(ERROR, prev_pos, "Failed to parse expression\n");
       return 0;
     } break;
   }
@@ -870,12 +986,12 @@ internal ExpressionAST* parseExpression() {
   ExpressionAST* expr = parsePrimitive();
   if (expr) {
     if (binopPrecedence(token)) {
-      BinaryExpressionAST* bin = arenaPush(&perm_arena, sizeof(BinaryExpressionAST));
+      BinaryExpressionAST* bin = arena_push(&perm_arena, sizeof(BinaryExpressionAST));
       bin->expr.expr_type = BINOP_EXPR;
       bin->expr.stmt.pos = prev_pos;
       bin->operator = token;
       bin->lhs = expr;
-      logDebugInfoAt(prev_pos, "Found binary expression with operator %s\n", print_token());
+      jai_log_at(DEBUG_INFO, prev_pos, "Found binary expression with operator %s\n", print_token());
       eatToken();
       bin->rhs = parseExpression();
       return &bin->expr;
@@ -888,15 +1004,14 @@ internal ExpressionAST* parseExpression() {
 internal bool parseType(TypeAST* result) {
   bool partial_success = false;
 
-  DynArray partial_types;
-  arrayInit(&partial_types, 4, sizeof(PartialTypeAST));
+  DynArray partial_types = array_create(4, sizeof(PartialTypeAST));
 
   while (1) {
     if (token == '[') {
       partial_success = true;
       eatToken();
       if (token == ']') {
-        PartialTypeAST* type = arrayPush(&partial_types);
+        PartialTypeAST* type = array_push(&partial_types);
         type->class = ARRAY_TYPE_AST;
         eatToken();
         continue;
@@ -904,19 +1019,20 @@ internal bool parseType(TypeAST* result) {
         ExpressionAST* expr = parseExpression();
         if (expr) {
           if (token == ']') {
-            PartialTypeAST* type = arrayPush(&partial_types);
+            PartialTypeAST* type = array_push(&partial_types);
             type->class = STATIC_ARRAY_TYPE_AST;
-            type->size = expr;
+            type->static_array.size = expr;
             eatToken();
             continue;
-          } else {logErrorAt(prev_pos, "Expected matching ']' in array type\n");}
-        } else {logErrorAt(prev_pos, "Expected ']' or constant after '[' (array type)\n");}
+          } else {jai_log_at(ERROR, prev_pos, "Expected matching ']' in array type\n");}
+        } else {jai_log_at(ERROR, prev_pos, "Expected ']' or constant after '[' (array type)\n");}
       }
     }
     else if (token == '^') {
+      PartialTypeAST* type;
       partial_success = true;
       eatToken();
-      PartialTypeAST* type = arrayPush(&partial_types);
+      type = array_push(&partial_types);
       type->class = POINTER_TYPE_AST;
       continue;
     } else {
@@ -928,18 +1044,18 @@ internal bool parseType(TypeAST* result) {
   }
 
   if (token == TOK_IDENTIFIER) {
-    result->name = arenaPushString(&perm_arena, identifierStr);
+    result->name = arena_push_string(&perm_arena, identifierStr);
     eatToken();
   } else {
     if (partial_success) {
-      logErrorAt(prev_pos, "Expected type name\n");
+      jai_log_at(ERROR, prev_pos, "Expected type name\n");
     }
     return false;
   }
 
   if (arrayCount(&partial_types)) {
     result->num_partial_types = arrayCount(&partial_types);
-    result->partial_types = pushArrayToArena(&partial_types, &perm_arena);
+    result->partial_types = arena_push_array(&partial_types, &perm_arena);
   }
   arrayFree(&partial_types);
 
@@ -950,7 +1066,7 @@ internal StatementAST* _parseStatement() {
   FilePos pos_of_identifier = prev_pos;
 
   if (token == TOK_LOOP) {
-    LoopAST* loop = arenaPush(&perm_arena, sizeof(LoopAST));
+    LoopAST* loop = arena_push(&perm_arena, sizeof(LoopAST));
     loop->body.stmt.type = LOOP_STMT;
     loop->body.stmt.pos = prev_pos;
     /* TODO: size_t */
@@ -959,7 +1075,7 @@ internal StatementAST* _parseStatement() {
 
     if (token == TOK_IDENTIFIER || token == '_') {
       if (token == TOK_IDENTIFIER) {
-        loop->iter.name = arenaPushString(&perm_arena, identifierStr);
+        loop->iter.name = arena_push_string(&perm_arena, identifierStr);
         loop->iter.stmt.pos = prev_pos;
       }
       eatToken();
@@ -967,19 +1083,20 @@ internal StatementAST* _parseStatement() {
       if (token == ',') {
         eatToken();
         if (token == TOK_IDENTIFIER) {
-          loop->index.name = arenaPushString(&perm_arena, identifierStr);
+          loop->index.name = arena_push_string(&perm_arena, identifierStr);
           loop->index.stmt.pos = prev_pos;
           eatToken();
         } else {
-          logErrorAt(prev_pos, "Expected index name\n");
+          jai_log_at(ERROR, prev_pos, "Expected index name\n");
           return 0;
         }
       }
 
       if (token == ':') {
+        ExpressionAST* from;
         eatToken();
 
-        ExpressionAST* from = parseExpression();
+        from = parseExpression();
         if (from) {
           loop->from = from;
 
@@ -988,16 +1105,15 @@ internal StatementAST* _parseStatement() {
             eatToken();
             loop->to = parseExpression();
             if (!loop->to) {
-              logErrorAt(prev_pos, "Could not parse expression at end of loop\n");
+              jai_log_at(ERROR, prev_pos, "Could not parse expression at end of loop\n");
               return 0;
             }
           }
 
           /* parse block */
           if (token == '{') {
-            DynArray statements;
+            DynArray statements = array_create(16, sizeof(StatementAST*));
             eatToken();
-            arrayInit(&statements, 16, sizeof(StatementAST*));
             while (1) {
               StatementAST* stmt;
               if (token == '}') {
@@ -1006,74 +1122,74 @@ internal StatementAST* _parseStatement() {
               }
               stmt = parseStatement();
               if (stmt) {
-                arrayPushVal(&statements, &stmt);
+                array_pushVal(&statements, &stmt);
               } else {
-                logErrorAt(prev_pos, "Failed to parse statement in loop body\n");
+                jai_log_at(ERROR, prev_pos, "Failed to parse statement in loop body\n");
                 break;
               }
             }
             loop->body.num_statements = arrayCount(&statements);
-            loop->body.statements = pushArrayToArena(&statements, &perm_arena);
+            loop->body.statements = arena_push_array(&statements, &perm_arena);
             arrayFree(&statements);
             return &loop->body.stmt;
           } else {
-            logErrorAt(prev_pos, "Expected block after loop. Did you forget '{'?\n");
+            jai_log_at(ERROR, prev_pos, "Expected block after loop. Did you forget '{'?\n");
           }
           return 0;
-        } else {logErrorAt(prev_pos, "Expected expression\n");}
-      } else {logErrorAt(prev_pos, "Expected ':'\n");}
-    } else {logErrorAt(prev_pos, "Expected a name for element in list.. For example 'for x : list {...}'\n");}
+        } else {jai_log_at(ERROR, prev_pos, "Expected expression\n");}
+      } else {jai_log_at(ERROR, prev_pos, "Expected ':'\n");}
+    } else {jai_log_at(ERROR, prev_pos, "Expected a name for element in list.. For example 'for x : list {...}'\n");}
     return 0;
   }
 
   else if (token == TOK_RETURN) {
     ReturnAST* ast;
     eatToken();
-    ast = arenaPush(&perm_arena, sizeof(ReturnAST));
+    ast = arena_push(&perm_arena, sizeof(ReturnAST));
     ast->stmt.type = RETURN_STMT;
     ast->stmt.pos = prev_pos;
     ast->value = parseExpression();
     if (ast->value) {
       return &ast->stmt;
-    } else {logErrorAt(ast->stmt.pos, "Failed to parse return statement\n");}
+    } else {jai_log_at(ERROR, ast->stmt.pos, "Failed to parse return statement\n");}
   }
 
   else if (token == TOK_FN) {
     local_persist int functionID = 0;
-    FunctionDeclarationAST* fun = arenaPush(&perm_arena, sizeof(FunctionDeclarationAST));
+    FunctionDeclarationAST* fun = arena_push(&perm_arena, sizeof(FunctionDeclarationAST));
     fun->body.stmt.type = FUNCTION_DECLARATION_STMT;
     fun->id = functionID++;
     fun->pos = prev_pos;
     eatToken();
 
     if (token == TOK_IDENTIFIER) {
-      fun->name = arenaPushString(&perm_arena, identifierStr);
+      fun->name = arena_push_string(&perm_arena, identifierStr);
       eatToken();
 
       /* arguments */
       if (token == '(') {
-        DynArray /* ArgumentAST* */ args;
+        DynArray args = array_create(0, sizeof(ArgumentAST));
         eatToken();
-        arrayInit(&args, 0, sizeof(ArgumentAST));
+        
 
         while (1) {
-          ArgumentAST* arg
+          ArgumentAST* arg;
           if (token == ')') {
             eatToken();
             break;
           }
-          arg = arrayPush(&args);
+          arg = array_push(&args);
           arg->stmt.pos = prev_pos;
           if (token == TOK_IDENTIFIER) {
-            arg->name = arenaPushString(&perm_arena, identifierStr);
+            arg->name = arena_push_string(&perm_arena, identifierStr);
             eatToken();
-            logDebugInfo("Found parameter %s\n", arg->name);
+            jai_log(DEBUG_INFO, "Found parameter %s\n", arg->name);
 
             if (token == ':') {
               eatToken();
 
               if (parseType(&arg->type_ast)) {
-                logDebugInfo(" - with type %s\n", print_type_ast_name(arg->type_ast));
+                jai_log(DEBUG_INFO, " - with type %s\n", print_type_ast_name(arg->type_ast));
                 /* TODO: default parameters */
 
                 if (token == ',') {
@@ -1083,22 +1199,22 @@ internal StatementAST* _parseStatement() {
                 else if (token == ')') {
                   eatToken();
                   break;
-                } else {logErrorAt(prev_pos, "Expected ',' or ')' after parameter\n");}
-              } else {logErrorAt(prev_pos, "Type expected after ':'\n");}
-            } else {logErrorAt(prev_pos, "No type found after parameter name (did you forget a ':'?\n");}
-          } else {logErrorAt(prev_pos, "Identifier expected in parameter list, found %s\n", print_token());}
+                } else {jai_log_at(ERROR, prev_pos, "Expected ',' or ')' after parameter\n");}
+              } else {jai_log_at(ERROR, prev_pos, "Type expected after ':'\n");}
+            } else {jai_log_at(ERROR, prev_pos, "No type found after parameter name (did you forget a ':'?\n");}
+          } else {jai_log_at(ERROR, prev_pos, "Identifier expected in parameter list, found %s\n", print_token());}
           arrayFree(&args);
           return 0;
         }
         fun->num_args = arrayCount(&args);
-        fun->args = pushArrayToArena(&args, &perm_arena);
+        fun->args = arena_push_array(&args, &perm_arena);
         arrayFree(&args);
 
         /* return value */
         if (token == ':') {
           eatToken();
           if (!parseType(&fun->return_type_ast)) {
-            logErrorAt(prev_pos, "Expected type after ':'");
+            jai_log_at(ERROR, prev_pos, "Expected type after ':'");
           };
         } else {
           fun->return_type_ast = void_type_ast;
@@ -1114,15 +1230,14 @@ internal StatementAST* _parseStatement() {
               eatToken();
               fun->is_foreign = true;
             } else {
-              logErrorAt(prev_pos, "Invalid compiler directive, did you mean to use 'foreign' ?\n");
+              jai_log_at(ERROR, prev_pos, "Invalid compiler directive, did you mean to use 'foreign' ?\n");
               return 0;
             }
           }
 
           else if (token == '{') {
+            DynArray statements = array_create(32, sizeof(StatementAST*));
             eatToken();
-            DynArray statements;
-            arrayInit(&statements, 32, sizeof(StatementAST*));
             while (1) {
               if (token == '}') {
                 eatToken();
@@ -1130,50 +1245,49 @@ internal StatementAST* _parseStatement() {
               } else {
                 StatementAST* stmt = parseStatement();
                 if (stmt) {
-                  arrayPushVal(&statements, &stmt);
+                  array_pushVal(&statements, &stmt);
                   continue;
-                } else {logErrorAt(prev_pos, "Failed to parse statement in %s\n", fun->name);}
+                } else {jai_log_at(ERROR, prev_pos, "Failed to parse statement in %s\n", fun->name);}
               }
               goto_matching_brace();
               arrayFree(&statements);
               return 0;
             }
             fun->body.num_statements = arrayCount(&statements);
-            fun->body.statements = pushArrayToArena(&statements, &perm_arena);
+            fun->body.statements = arena_push_array(&statements, &perm_arena);
             arrayFree(&statements);
 
-          } else {logErrorAt(prev_pos, "No '{' or '#foreign' found after function parameter list\n");}
+          } else {jai_log_at(ERROR, prev_pos, "No '{' or '#foreign' found after function parameter list\n");}
 
-          logDebugInfo("Found a function definition with name %s, and %i arguments\n", fun->name, fun->num_args);
+          jai_log(DEBUG_INFO, "Found a function definition with name %s, and %i arguments\n", fun->name, fun->num_args);
           return &fun->body.stmt;
-        } else {logErrorAt(prev_pos, "Failed to parse return type\n");}
-      } else {logErrorAt(prev_pos, "token %s not start of a function prototype\n", print_token(token));}
-    } else {logErrorAt(prev_pos, "Expected function name, found %s\n", print_token());}
+        } else {jai_log_at(ERROR, prev_pos, "Failed to parse return type\n");}
+      } else {jai_log_at(ERROR, prev_pos, "token %s not start of a function prototype\n", print_token(token));}
+    } else {jai_log_at(ERROR, prev_pos, "Expected function name, found %s\n", print_token());}
     return 0;
   }
 
   /* struct? */
   else if (token == TOK_STRUCT) {
-    StructDeclarationAST* decl = arenaPush(&perm_arena, sizeof(StructDeclarationAST));
+    StructDeclarationAST* decl = arena_push(&perm_arena, sizeof(StructDeclarationAST));
     decl->stmt.type = STRUCT_DECLARATION_STMT;
     decl->stmt.pos = pos_of_identifier;
     decl->str.type.type = STRUCT_TYPE;
     eatToken();
 
     if (token == TOK_IDENTIFIER) {
-      decl->str.name = arenaPushString(&perm_arena, identifierStr);
+      decl->str.name = arena_push_string(&perm_arena, identifierStr);
       eatToken();
 
       if (token == '{') {
-        DynArray members; /* MemberAST */
+        DynArray members = array_create(4, sizeof(MemberAST));
         eatToken();
 
         /* members */
-        arrayInit(&members, 4, sizeof(MemberAST));
         while (1) {
-          MemberAST* member = arrayPush(&members);
+          MemberAST* member = array_push(&members);
           if (token == TOK_IDENTIFIER) {
-            member->name = arenaPushString(&perm_arena, identifierStr);
+            member->name = arena_push_string(&perm_arena, identifierStr);
             member->pos = prev_pos;
             eatToken();
             if (token == ':') {
@@ -1186,9 +1300,9 @@ internal StatementAST* _parseStatement() {
                 } else {
                   continue;
                 }
-              } else { logErrorAt(prev_pos, "No type after member\n"); }
-            } else { logErrorAt(prev_pos, "No type after member. Did you forget a ':'?\n"); }
-          } else { logErrorAt(prev_pos, "Expected member name, instead found %s\n", print_token()); }
+              } else { jai_log_at(ERROR, prev_pos, "No type after member\n"); }
+            } else { jai_log_at(ERROR, prev_pos, "No type after member. Did you forget a ':'?\n"); }
+          } else { jai_log_at(ERROR, prev_pos, "Expected member name, instead found %s\n", print_token()); }
           while (token != '}') {
             eatToken();
           }
@@ -1198,11 +1312,11 @@ internal StatementAST* _parseStatement() {
         }
 
         decl->str.num_members = arrayCount(&members);
-        decl->str.members = pushArrayToArena(&members, &perm_arena);
+        decl->str.members = arena_push_array(&members, &perm_arena);
         arrayFree(&members);
         return &decl->stmt;
-      } else {logErrorAt(pos_of_identifier, "Expected '{' after struct keyword\n");}
-    } else {logErrorAt(prev_pos, "Expected struct name, got %s", print_token());}
+      } else {jai_log_at(ERROR, pos_of_identifier, "Expected '{' after struct keyword\n");}
+    } else {jai_log_at(ERROR, prev_pos, "Expected struct name, got %s", print_token());}
     return 0;
   }
 
@@ -1212,17 +1326,17 @@ internal StatementAST* _parseStatement() {
     if (token == TOK_IDENTIFIER) {
       VariableDeclarationAST* var;
 
-      var = arenaPush(&perm_arena, sizeof(VariableDeclarationAST));
+      var = arena_push(&perm_arena, sizeof(VariableDeclarationAST));
       var->stmt.type = VARIABLE_DECLARATION_STMT;
       var->stmt.pos = prev_pos;
-      var->name = arenaPushString(&perm_arena, identifierStr);
+      var->name = arena_push_string(&perm_arena, identifierStr);
       eatToken();
 
       /* type? */
       if (token == ':') {
         eatToken();
         if (!parseType(&var->type_ast)) {
-          logErrorAt(prev_pos, "Expected type after ':'\n");
+          jai_log_at(ERROR, prev_pos, "Expected type after ':'\n");
           return 0;
         }
       }
@@ -1235,13 +1349,13 @@ internal StatementAST* _parseStatement() {
 
       /* if no assignment, was there at least a type declaration? */
       if (!var->value && !var->type_ast.name) {
-        logErrorAt(prev_pos, "Can't infer type of variable. Need type declaration or initial value");
+        jai_log_at(ERROR, prev_pos, "Can't infer type of variable. Need type declaration or initial value");
         return 0;
       }
 
       return &var->stmt;
 
-    } else {logErrorAt(prev_pos, "Expected variable name, got token %s", print_token());}
+    } else {jai_log_at(ERROR, prev_pos, "Expected variable name, got token %s", print_token());}
   }
 
   else {
@@ -1249,9 +1363,9 @@ internal StatementAST* _parseStatement() {
     if (expr) {
       /* assignment? */
       if (token == '=') {
-        AssignmentAST* ass
+        AssignmentAST* ass;
         eatToken();
-        ass = arenaPush(&perm_arena, sizeof(AssignmentAST));
+        ass = arena_push(&perm_arena, sizeof(AssignmentAST));
         ass->stmt.type = ASSIGNMENT_STMT;
         ass->stmt.pos = pos_of_identifier;
         ass->lhs = expr;
@@ -1260,7 +1374,7 @@ internal StatementAST* _parseStatement() {
           return &ass->stmt;
         }
         else {
-          logErrorAt(prev_pos, "Failed to parse right hand side of assignment, expected expression\n");
+          jai_log_at(ERROR, prev_pos, "Failed to parse right hand side of assignment, expected expression\n");
           return 0;
         }
       }
@@ -1272,7 +1386,7 @@ internal StatementAST* _parseStatement() {
       }
 
       return 0;
-    } else {logErrorAt(pos_of_identifier, "Failed to parse statement\n"); }
+    } else {jai_log_at(ERROR, pos_of_identifier, "Failed to parse statement\n"); }
   }
   return 0;
 }
@@ -1312,7 +1426,7 @@ internal Constant* getConstantFromExpression(ExpressionAST* val) {
         Constant* r = getConstantFromExpression(bin->rhs);
         if (r && r->expr.type == l->expr.type) {
 
-          Constant* result = arenaPush(&perm_arena, sizeof(Constant));
+          Constant* result = arena_push(&perm_arena, sizeof(Constant));
           result->expr.expr_type = LITERAL_EXPR;
           result->expr.type = r->expr.type;
 
@@ -1363,7 +1477,7 @@ internal Constant* getConstantFromExpression(ExpressionAST* val) {
     } break;
 
     default: {
-      logErrorAt(val->stmt.pos, "Value of expression could not be determined at compile time\n");
+      jai_log_at(ERROR, val->stmt.pos, "Value of expression could not be determined at compile time\n");
     } break;
   }
   return 0;
@@ -1428,18 +1542,18 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
 
               /* create new type if needed */
               if (!result) {
-                result = arenaPush(&perm_arena, sizeof(StaticArrayType));
+                result = arena_push(&perm_arena, sizeof(StaticArrayType));
                 result->arr.type.type = STATIC_ARRAY_TYPE;
                 result->arr.base_type = base_type;
                 result->size = constant->value.int_val;
-                arrayPushVal(&generated_types, &result);
+                array_pushVal(&generated_types, &result);
               }
 
               return (Type*) result;
 
-            } else {logErrorAt(type_ast.partial_types->static_array.size->stmt.pos, "Array size must be integer, but got '$t'");}
-          } else {logErrorAt(type_ast.partial_types->static_array.size->stmt.pos, "Array size must be a compile time constant\n");}
-        } else {logError("Could not find type %s\n", print_type_ast_name(subtype_ast));}
+            } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Array size must be integer, but got '$t'");}
+          } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Array size must be a compile time constant\n");}
+        } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
       } break;
 
       case ARRAY_TYPE_AST: {
@@ -1461,15 +1575,15 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
 
           /* create new type if needed */
           if (!result) {
-            result = arenaPush(&perm_arena, sizeof(ArrayType));
+            result = arena_push(&perm_arena, sizeof(ArrayType));
             result->type.type = ARRAY_TYPE;
             result->base_type = base_type;
-            arrayPushVal(&generated_types, &result);
+            array_pushVal(&generated_types, &result);
           }
 
           return &result->type;
 
-        } else {logError("Could not find type %s\n", print_type_ast_name(subtype_ast));}
+        } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
       } break;
 
       case POINTER_TYPE_AST: {
@@ -1490,14 +1604,14 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
           }
 
           if (!result) {
-            result = arenaPush(&perm_arena, sizeof(PointerType));
+            result = arena_push(&perm_arena, sizeof(PointerType));
             result->type.type = POINTER_TYPE;
             result->base_type = base_type;
-            arrayPushVal(&generated_types, &result);
+            array_pushVal(&generated_types, &result);
           }
 
           return &result->type;
-        } else {logError("Could not find type %s\n", print_type_ast_name(subtype_ast));}
+        } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
 
         /* create new type if needed */
       } break;
@@ -1509,8 +1623,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
 
 internal DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope) {
   /* TODO: builtin functions? */
-  DynArray funs;
-  arrayInit(&funs, 2, sizeof(FunctionDeclarationAST*));
+  DynArray funs = array_create(2, sizeof(FunctionDeclarationAST*));
   while (scope) {
     int i;
     for (i = 0; i < scope->num_statements; ++i) {
@@ -1518,7 +1631,7 @@ internal DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scop
       if (stmt->type == FUNCTION_DECLARATION_STMT) {
         FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
         if (strcmp(fun->name, name) == 0) {
-          arrayPushVal(&funs, &fun);
+          array_pushVal(&funs, &fun);
         }
       }
     }
@@ -1577,18 +1690,18 @@ internal void _evaluateTypeOfStruct(StructType* str, DynArray* parents, Compound
     if (!str->members[i].type) {
       str->members[i].type = getTypeDeclaration(str->members[i].type_ast, scope, false);
       if (!str->members[i].type) {
-        logErrorAt(str->members[i].pos, "Could not find type %s\n", print_type_ast_name(str->members[i].type_ast));
+        jai_log_at(ERROR, str->members[i].pos, "Could not find type %s\n", print_type_ast_name(str->members[i].type_ast));
         return;
       }
       if (str->members[i].type->type == STRUCT_TYPE && str->members[i].type_ast.num_partial_types == 0) {
         char **parent, **end;
         for (parent = arrayBegin(parents), end = arrayEnd(parents); parent != end; ++parent) {
           if (strcmp(*parent, str->members[i].type_ast.name) == 0) {
-            logErrorAt(str->members[i].pos, "TypeClass %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
+            jai_log_at(ERROR, str->members[i].pos, "TypeClass %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
             exit(1);
           }
         }
-        arrayPushVal(parents, &str->members[i].type_ast.name);
+        array_pushVal(parents, &str->members[i].type_ast.name);
         _evaluateTypeOfStruct((StructType*) str->members[i].type, parents, scope);
         arrayPop(parents);
       }
@@ -1596,9 +1709,8 @@ internal void _evaluateTypeOfStruct(StructType* str, DynArray* parents, Compound
   }
 }
 internal void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope) {
-  DynArray parents;
-  arrayInit(&parents, 4, sizeof(char*));
-  arrayPushVal(&parents, &str->name);
+  DynArray parents = array_create(4, sizeof(char*));
+  array_pushVal(&parents, &str->name);
   _evaluateTypeOfStruct(str, &parents, scope);
   arrayFree(&parents);
 }
@@ -1609,16 +1721,15 @@ internal bool hasImplicitConversion(Type* from, Type* to) {
 
 internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope);
 internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope) {
+  Type* declared_type = 0;
   if (!var || var->type) {
     return;
   }
 
-  Type* declared_type = 0;
-
   if (var->type_ast.name) {
     declared_type = getTypeDeclaration(var->type_ast, scope, true);
     if (!declared_type) {
-      logErrorAt(var->stmt.pos, "Declared type '%s' for '%s' doesn't exist\n", print_type_ast_name(var->type_ast), var->name);
+      jai_log_at(ERROR, var->stmt.pos, "Declared type '%s' for '%s' doesn't exist\n", print_type_ast_name(var->type_ast), var->name);
       var->type = 0;
       return;
     }
@@ -1628,7 +1739,7 @@ internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Com
   if (var->value) {
     evaluateTypeOfExpression(var->value, var->type, scope);
     if (!var->value->type) {
-      logErrorAt(var->stmt.pos, "Couldn't infer type for %s\n", var->name);
+      jai_log_at(ERROR, var->stmt.pos, "Couldn't infer type for %s\n", var->name);
       var->type = 0;
       return;
     }
@@ -1640,7 +1751,7 @@ internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Com
 
   /* check that infered expression type and stated type match */
   if (var->value && declared_type && var->value->type != declared_type && !hasImplicitConversion(var->value->type, declared_type)) {
-    logErrorAt(var->value->stmt.pos, "Inferred type of '%s': '$t' differs from declared type '$t'\n", var->name, var->value->type, declared_type);
+    jai_log_at(ERROR, var->value->stmt.pos, "Inferred type of '%s': '$t' differs from declared type '$t'\n", var->name, var->value->type, declared_type);
     var->type = 0;
     return;
   }
@@ -1658,13 +1769,13 @@ internal void evaluateTypeOfFunction(FunctionDeclarationAST* fun, CompoundStatem
   for (i = 0; i < fun->num_args; ++i) {
     fun->args[i].type = getTypeDeclaration(fun->args[i].type_ast, scope, true);
     if (!fun->args[i].type) {
-      logErrorAt(fun->args[i].stmt.pos, "Could not find type '%s'\n", print_type_ast_name(fun->args[i].type_ast));
+      jai_log_at(ERROR, fun->args[i].stmt.pos, "Could not find type '%s'\n", print_type_ast_name(fun->args[i].type_ast));
     }
   }
 
   fun->return_type = getTypeDeclaration(fun->return_type_ast, scope, true);
   if (!fun->return_type) {
-    logErrorAt(fun->pos, "Could not find definition of return type '%s' of '%s'\n", print_type_ast_name(fun->return_type_ast), fun->name);
+    jai_log_at(ERROR, fun->pos, "Could not find definition of return type '%s' of '%s'\n", print_type_ast_name(fun->return_type_ast), fun->name);
   }
 }
 
@@ -1678,7 +1789,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
 
     case LITERAL_EXPR: {
       /* type should have been created by the parser already */
-      if (!expr->type) {logError("Something went wrong in the compiler. Please report the bug!\n");}
+      if (!expr->type) {LOG_AND_DIE("Something went wrong in the compiler. Please report the bug!\n");}
     } break;
 
     case ARRAY_SUBSCRIPT_EXPR: {
@@ -1690,7 +1801,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
         if (as->base->type->type == ARRAY_TYPE || as->base->type->type == STATIC_ARRAY_TYPE) {
           base_type = ((ArrayType*) as->base->type)->base_type;
         } else {
-          logErrorAt(as->base->stmt.pos, "Type must be of array type, but found type $t", as->base->type);
+          jai_log_at(ERROR, as->base->stmt.pos, "Type must be of array type, but found type $t", as->base->type);
         }
 
         if (base_type) {
@@ -1699,7 +1810,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
             /* TODO: size_t instead */
             if (as->subscript->type->type == INT_TYPE) {
               as->expr.type = base_type;
-            } else {logErrorAt(as->subscript->stmt.pos, "Array subscript must be integer, found $t\n", as->subscript->type);}
+            } else {jai_log_at(ERROR, as->subscript->stmt.pos, "Array subscript must be integer, found $t\n", as->subscript->type);}
           }
         }
       }
@@ -1742,24 +1853,24 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
           }
           if (matches > 1) {
             /* TODO: print out actual matches, and not all overload */
-            logErrorAt(expr->stmt.pos, "Multiple matching overloads for %s.\n", base->name);
-            logNote("Overloads are:\n");
+            jai_log_at(ERROR, expr->stmt.pos, "Multiple matching overloads for %s.\n", base->name);
+            jai_log(NOTE, "Overloads are:\n");
             for (it = arrayBegin(&funs), end = arrayEnd(&funs); it < end; ++it) {
-              logNoteAt((*it)->pos, "\n");
+              jai_log_at(NOTE, (*it)->pos, "\n");
             }
           } else if (matches == 0) {
-            logErrorAt(expr->stmt.pos, "Could not find matching function overload for %s.\n", base->name);
-            logNote("Alternatives are:\n");
+            jai_log_at(ERROR, expr->stmt.pos, "Could not find matching function overload for %s.\n", base->name);
+            jai_log(NOTE, "Alternatives are:\n");
             for (it = arrayBegin(&funs), end = arrayEnd(&funs); it < end; ++it) {
-              logNoteAt((*it)->pos, "\n");
+              jai_log_at(NOTE, (*it)->pos, "\n");
             }
           }
 
-        } else {logErrorAt(call->expr.stmt.pos, "Unknown function '%s'\n", base->name); }
+        } else {jai_log_at(ERROR, call->expr.stmt.pos, "Unknown function '%s'\n", base->name); }
 
         arrayFree(&funs);
 
-      } else {logErrorAt(call->expr.stmt.pos, "Functions pointers not yet supported\n");}
+      } else {jai_log_at(ERROR, call->expr.stmt.pos, "Functions pointers not yet supported\n");}
     } break;
 
     case VARIABLE_GET_EXPR: {
@@ -1767,7 +1878,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
       VariableDeclarationAST* var = getVariableDeclaration(var_ref->name, scope);
       if (var) {
         expr->type = var->type;
-      } else {logErrorAt(var_ref->expr.stmt.pos, "Use of undeclared variable '%s'\n", var_ref->name);}
+      } else {jai_log_at(ERROR, var_ref->expr.stmt.pos, "Use of undeclared variable '%s'\n", var_ref->name);}
     } break;
 
     case MEMBER_ACCESS_EXPR: {
@@ -1790,7 +1901,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
           if (match) {
             assert(match->type);
             access->expr.type = match->type;
-          } else {logErrorAt(access->expr.stmt.pos, "struct %s has no member %s\n", str->name, access->name);}
+          } else {jai_log_at(ERROR, access->expr.stmt.pos, "struct %s has no member %s\n", str->name, access->name);}
         } else if (access->base->type->type == ARRAY_TYPE) {
 
           if (!strcmp(access->name, "count") || !strcmp(access->name, "size") || !strcmp(access->name, "length")) {
@@ -1798,11 +1909,11 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
             access->expr.type = &builtin_types[INT_TYPE];
           }
           else if (!strcmp(access->name, "data")) {
-            logErrorAt(access->expr.stmt.pos, "Pointers not yet implemented\n");
+            jai_log_at(ERROR, access->expr.stmt.pos, "Pointers not yet implemented\n");
             UNIMPLEMENTED;
           }
 
-        } else {logErrorAt(access->base->stmt.pos, "Can only access members of structs or arrays, '$t' is neither\n", access->base->type);}
+        } else {jai_log_at(ERROR, access->base->stmt.pos, "Can only access members of structs or arrays, '$t' is neither\n", access->base->type);}
       }
     } break;
 
@@ -1824,14 +1935,14 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
               }
             }
             if (!name_match) {
-              logErrorAt(expr->stmt.pos, "%s has no member %s\n", target->name, ast->members[i].name);
+              jai_log_at(ERROR, expr->stmt.pos, "%s has no member %s\n", target->name, ast->members[i].name);
               all_match = false;
               break;
             }
             assert(ast->members[i].member->type);
             evaluateTypeOfExpression(ast->members[i].value, ast->members[i].member->type, scope);
             if (ast->members[i].value->type != ast->members[i].member->type) {
-              logErrorAt(expr->stmt.pos, "The member '%s' in '%s' has type '$t', but the expression has type '$t'\n", ast->members[i].member->name, target->name, ast->members[i].member->type, ast->members[i].value->type);
+              jai_log_at(ERROR, expr->stmt.pos, "The member '%s' in '%s' has type '$t', but the expression has type '$t'\n", ast->members[i].member->name, target->name, ast->members[i].member->type, ast->members[i].value->type);
               all_match = false;
               break;
             }
@@ -1839,8 +1950,8 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
           if (all_match) {
             expr->type = evidence;
           }
-        } else {logErrorAt(expr->stmt.pos, "Cannot use struct initialization for non-struct type $t\n", evidence);}
-      } else {logErrorAt(expr->stmt.pos, "Not enough type information top evaluate type of struct initialization\n");}
+        } else {jai_log_at(ERROR, expr->stmt.pos, "Cannot use struct initialization for non-struct type $t\n", evidence);}
+      } else {jai_log_at(ERROR, expr->stmt.pos, "Not enough type information top evaluate type of struct initialization\n");}
     } break;
 
     case BINOP_EXPR: {
@@ -1851,7 +1962,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
       if (ast->lhs->type == ast->rhs->type) {
         ast->expr.type = ast->lhs->type;
       } else {
-        logErrorAt(ast->lhs->stmt.pos, "Type of left hand side '$t' does not match type of right hand side '$t'\n", ast->lhs->type, ast->rhs->type);
+        jai_log_at(ERROR, ast->lhs->stmt.pos, "Type of left hand side '$t' does not match type of right hand side '$t'\n", ast->lhs->type, ast->rhs->type);
       }
     } break;
   }
@@ -1864,12 +1975,12 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
 
     if (evidence == &array_no_internal_type) {
       if (expr->type->type != ARRAY_TYPE && expr->type->type != STATIC_ARRAY_TYPE) {
-        logErrorAt(expr->stmt.pos, "Context demands array, but expression was of type $t\n", expr->type);
+        jai_log_at(ERROR, expr->stmt.pos, "Context demands array, but expression was of type $t\n", expr->type);
         expr->type = 0;
       }
     }
     else if (evidence != expr->type) {
-      logErrorAt(expr->stmt.pos, "Expected type $t, but expression was type $t\n", evidence, expr->type);
+      jai_log_at(ERROR, expr->stmt.pos, "Expected type $t, but expression was type $t\n", evidence, expr->type);
       expr->type = 0;
     }
   }
@@ -1886,16 +1997,16 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
       case STRUCT_DECLARATION_STMT: {
         StructDeclarationAST* decl = (StructDeclarationAST*) stmt;
         evaluateTypeOfStruct(&decl->str, scope);
-        logDebugInfo("Evaluated type of struct '%s'\n", decl->str.name);
+        jai_log(DEBUG_INFO, "Evaluated type of struct '%s'\n", decl->str.name);
       } break;
 
       case VARIABLE_DECLARATION_STMT: {
         VariableDeclarationAST* var = (VariableDeclarationAST*) stmt;
         evaluateTypeOfVariableDeclaration(var, scope);
         if (var->type) {
-          logDebugInfoAt(var->stmt.pos, "Evaluated type of '%s' to '$t'\n", var->name, var->type);
+          jai_log_at(DEBUG_INFO, var->stmt.pos, "Evaluated type of '%s' to '$t'\n", var->name, var->type);
         } else {
-          logErrorAt(var->stmt.pos, "Failed to evaluate type of '%s'\n", var->name);
+          jai_log_at(ERROR, var->stmt.pos, "Failed to evaluate type of '%s'\n", var->name);
         }
       } break;
 
@@ -1906,16 +2017,16 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
         if (fun->body.num_statements) {
           doTypeInferenceForScope(&fun->body);
         }
-        logDebugInfoAt(fun->pos, "Evaluated body of '%s'\n", fun->name);
+        jai_log_at(DEBUG_INFO, fun->pos, "Evaluated body of '%s'\n", fun->name);
       } break;
 
       case EXPRESSION_STMT: {
         ExpressionAST* expr = (ExpressionAST*) stmt;
         evaluateTypeOfExpression(expr, 0, scope);
         if (expr->type) {
-          logDebugInfoAt(expr->stmt.pos, "Evaluated type of expression to $t\n", expr->type);
+          jai_log_at(DEBUG_INFO, expr->stmt.pos, "Evaluated type of expression to $t\n", expr->type);
         } else {
-          logErrorAt(expr->stmt.pos, "Failed to infer type of expression\n");
+          jai_log_at(ERROR, expr->stmt.pos, "Failed to infer type of expression\n");
         }
       } break;
 
@@ -1933,10 +2044,10 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
           evaluateTypeOfExpression(loop->from, &builtin_types[INT_TYPE], scope);
           evaluateTypeOfExpression(loop->to, &builtin_types[INT_TYPE], scope);
           if (!loop->from->type || !loop->to->type) {
-            logErrorAt(loop->from->stmt.pos, "Loop indexes are not integers\n");
+            jai_log_at(ERROR, loop->from->stmt.pos, "Loop indexes are not integers\n");
           }
           if (loop->from->type != loop->to->type) {
-            logErrorAt(loop->from->stmt.pos, "Types of start index and stop index differ\n");
+            jai_log_at(ERROR, loop->from->stmt.pos, "Types of start index and stop index differ\n");
           }
           loop->iter.type = loop->from->type;
         } else {
@@ -1946,7 +2057,7 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
             ArrayType* arr = (ArrayType*) loop->from->type;
             loop->iter.type = arr->base_type;
           }
-          else {logErrorAt(loop->from->stmt.pos, "Loop iteratable must be of array type\n"); }
+          else {jai_log_at(ERROR, loop->from->stmt.pos, "Loop iteratable must be of array type\n"); }
         }
 
         doTypeInferenceForScope(&loop->body);
@@ -1957,13 +2068,13 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
         evaluateTypeOfExpression(ass->lhs, 0, scope);
         evaluateTypeOfExpression(ass->rhs, ass->lhs->type, scope);
         if (!ass->lhs->type) {
-          logErrorAt(stmt->pos, "Could not infer type of left hand side of assignment\n");
+          jai_log_at(ERROR, stmt->pos, "Could not infer type of left hand side of assignment\n");
         }
         else if (!ass->rhs->type) {
-          logErrorAt(stmt->pos, "Could not infer type of right hand side of assignment\n");
+          jai_log_at(ERROR, stmt->pos, "Could not infer type of right hand side of assignment\n");
         }
         else if (ass->lhs->type != ass->rhs->type && !hasImplicitConversion(ass->rhs->type, ass->lhs->type)) {
-          logErrorAt(stmt->pos, "Left hand side has type $t, but right hand side has type $t\n", ass->lhs->type, ass->rhs->type);
+          jai_log_at(ERROR, stmt->pos, "Left hand side has type $t, but right hand side has type $t\n", ass->lhs->type, ass->rhs->type);
         }
       } break;
 
@@ -1982,14 +2093,14 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
           evaluateTypeOfExpression(ret->value, fun->return_type, scope);
           if (ret->value->type) {
             if (ret->value->type != fun->return_type) {
-              logErrorAt(ret->stmt.pos, "Return type $t does not match function return type $t\n", ret->value->type, fun->return_type);
+              jai_log_at(ERROR, ret->stmt.pos, "Return type $t does not match function return type $t\n", ret->value->type, fun->return_type);
             }
-          } else {logErrorAt(ret->stmt.pos, "Could not infer type of return value\n")};
-        } else {logErrorAt(ret->stmt.pos, "Can only use return inside function\n");}
+          } else {jai_log_at(ERROR, ret->stmt.pos, "Could not infer type of return value\n");};
+        } else {jai_log_at(ERROR, ret->stmt.pos, "Can only use return inside function\n");}
       } break;
 
       case UNKNOWN_STMT: {
-        logDebugError("Unknown statement\n");
+        jai_log(DEBUG_ERROR, "Unknown statement\n");
       } break;
 
     }
@@ -1998,13 +2109,11 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
 }
 
 global String _print_buf;
-internal void print(FILE* file, char* fmt, ...) {
+internal void vprint(FILE* file, char* fmt, va_list args) {
   char *p, *str;
-  va_list args;
-  va_start(args, fmt);
-  stringClear(&_print_buf);
-  stringAppend(&_print_buf, fmt);
-  p = str = stringGet(&_print_buf);
+  string_clear(&_print_buf);
+  string_append(&_print_buf, fmt);
+  p = str = string_get(&_print_buf);
 
   while (*p) {
     if (*p == '$') {
@@ -2103,10 +2212,16 @@ internal void print(FILE* file, char* fmt, ...) {
   }
   vfprintf(file, str, args);
 }
+internal void print(FILE* file, char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  vprint(file, fmt, args);
+  va_end(args);
+}
 
 /** Compile AST to C **/
 
-internal static void compile_variable_decl_to_c(Type* type, char* name, bool prefix, FILE* file) {
+internal void compile_variable_decl_to_c(Type* type, char* name, bool prefix, FILE* file) {
   /* We handle the types, C only needs to know the size of the static allocation */
   /* ^^[32][8]int      ->   void* name; (pointer size) */
   /* [32][8]^[64]^int  ->   void* name[32][8] (32*8*pointer size) */
@@ -2133,27 +2248,29 @@ internal static void compile_variable_decl_to_c(Type* type, char* name, bool pre
 }
 
 internal void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArray* done) {
-  for (StructType** s = arrayBegin(done), **end = arrayEnd(done); s != end; ++s) {
+  StructType **s, **end;
+  int i;
+  for (s = arrayBegin(done), end = arrayEnd(done); s != end; ++s) {
     if (*s == str) {
       return;
     }
   }
-  arrayPushVal(done, &str);
+  array_pushVal(done, &str);
 
   /* check if we need to compile the members types first */
-  for (int i = 0; i < str->num_members; ++i) {
+  for (i = 0; i < str->num_members; ++i) {
     MemberAST* member = str->members + i;
     if (member->type->type == STRUCT_TYPE) {
       compile_type_to_c(header, body, (StructType*) member->type, done);
     }
   }
 
-  logDebugInfo("Compiling struct %s to C\n", str->name);
+  jai_log(DEBUG_INFO, "Compiling struct %s to C\n", str->name);
 
   /* Compile struct definition */
   fprintf(header, "typedef struct T_%s T_%s;\n", str->name, str->name);
   fprintf(body, "typedef struct T_%s {", str->name);
-  for (int i = 0; i < str->num_members; ++i) {
+  for (i = 0; i < str->num_members; ++i) {
     MemberAST* member = str->members + i;
     compile_variable_decl_to_c(member->type, member->name, false, body);
     fprintf(body, ";");
@@ -2171,18 +2288,18 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
 
     case LITERAL_EXPR: {
       switch (expr->type->type) {
-        case FLOAT_TYPE: fprintf(body, "%lf", ((Constant*) expr)->float_val); break;
-        case INT_TYPE: fprintf(body, "%i", ((Constant*) expr)->int_val); break;
-        case I8_TYPE: fprintf(body, "%i", ((Constant*) expr)->i8); break;
-        case I16_TYPE: fprintf(body, "%i", ((Constant*) expr)->i16); break;
-        case I32_TYPE: fprintf(body, "%i", ((Constant*) expr)->i32); break;
-        case I64_TYPE: fprintf(body, "%li", ((Constant*) expr)->i64); break;
-        case U8_TYPE: fprintf(body, "%u", ((Constant*) expr)->u8); break;
-        case U16_TYPE: fprintf(body, "%u", ((Constant*) expr)->u16); break;
-        case U32_TYPE: fprintf(body, "%u", ((Constant*) expr)->u32); break;
-        case U64_TYPE: fprintf(body, "%lu", ((Constant*) expr)->u64); break;
-        case F32_TYPE: fprintf(body, "%f", ((Constant*) expr)->f32); break;
-        case F64_TYPE: fprintf(body, "%lf", ((Constant*) expr)->f64); break;
+        case FLOAT_TYPE: fprintf(body, "%f", ((Constant*) expr)->value.float_val); break;
+        case INT_TYPE: fprintf(body, "%i", ((Constant*) expr)->value.int_val); break;
+        case I8_TYPE: fprintf(body, "%i", ((Constant*) expr)->value.i8); break;
+        case I16_TYPE: fprintf(body, "%i", ((Constant*) expr)->value.i16); break;
+        case I32_TYPE: fprintf(body, "%i", ((Constant*) expr)->value.i32); break;
+        case I64_TYPE: fprintf(body, "%li", ((Constant*) expr)->value.i64); break;
+        case U8_TYPE: fprintf(body, "%u", ((Constant*) expr)->value.u8); break;
+        case U16_TYPE: fprintf(body, "%u", ((Constant*) expr)->value.u16); break;
+        case U32_TYPE: fprintf(body, "%u", ((Constant*) expr)->value.u32); break;
+        case U64_TYPE: fprintf(body, "%lu", ((Constant*) expr)->value.u64); break;
+        case F32_TYPE: fprintf(body, "%f", ((Constant*) expr)->value.f32); break;
+        case F64_TYPE: fprintf(body, "%f", ((Constant*) expr)->value.f64); break;
         default: UNREACHABLE; break;
       }
     } break;
@@ -2211,6 +2328,7 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
     case CALL_EXPR: {
       CallAST* call = (CallAST*) expr;
       if (call->base->expr_type == VARIABLE_GET_EXPR) {
+        int i;
         VariableGetAST* base = (VariableGetAST*) call->base;
         if (call->fun->is_foreign) {
           fprintf(body, "%s(", base->name);
@@ -2218,14 +2336,14 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
         else {
           print(body, "$f(", call->fun);
         }
-        for (int i = 0; i < call->num_args; ++i) {
+        for (i = 0; i < call->num_args; ++i) {
           compile_expression_to_c(call->args[i], body);
           if (i != call->num_args - 1) {
             fprintf(body, ", ");
           }
         }
         fprintf(body, ")");
-      } else {logErrorAt(call->base->stmt.pos, "Function pointers not yet implemented");}
+      } else {jai_log_at(ERROR, call->base->stmt.pos, "Function pointers not yet implemented");}
     } break;
 
     case BINOP_EXPR: {
@@ -2238,57 +2356,57 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
     } break;
 
     case STRUCT_INIT_EXPR: {
-      logErrorAt(expr->stmt.pos, "<internal>: Cannot directly compile a struct initialization\n");
+      jai_log_at(ERROR, expr->stmt.pos, "<internal>: Cannot directly compile a struct initialization\n");
     } break;
   }
 }
 
 internal void _get_member_access_chain(String* res, ExpressionAST* expr) {
   if (expr->expr_type == VARIABLE_GET_EXPR) {
-    stringAppend(res, ((VariableGetAST*) expr)->name);
+    string_append(res, ((VariableGetAST*) expr)->name);
   }
   else if (expr->expr_type == MEMBER_ACCESS_EXPR) {
     _get_member_access_chain(res, ((MemberAccessAST*) expr)->base);
-    stringAppendChar(res, '.');
-    stringAppend(res, ((MemberAccessAST*) expr)->name);
+    string_append_char(res, '.');
+    string_append(res, ((MemberAccessAST*) expr)->name);
   }
-  else {logDebugError("Member access is only supported on variables\n"); }
+  else {jai_log(DEBUG_ERROR, "Member access is only supported on variables\n"); }
 }
 internal String get_member_access_chain(MemberAccessAST* acc) {
-  String s;
-  stringInit(&s, 0);
+  String s = string_create(0);
   _get_member_access_chain(&s, &acc->expr);
   return s;
 }
 
 internal void _compile_struct_init_to_c(String name, StructInitializationAST* init, FILE* file) {
-  for (int i = 0; i < init->num_members; ++i) {
+  int i;
+  for (i = 0; i < init->num_members; ++i) {
     MemberInitializationAST* member = init->members + i;
-    stringAppendChar(&name, '.');
-    int len = stringAppend(&name, member->name);
+    int len;
+    string_append_char(&name, '.');
+    len = string_append(&name, member->name);
     if (member->value->expr_type == STRUCT_INIT_EXPR) {
       _compile_struct_init_to_c(name, (StructInitializationAST*) member->value, file);
     } else {
-      fprintf(file, "\n%s = ", stringGet(&name));
+      fprintf(file, "\n%s = ", string_get(&name));
       compile_expression_to_c(member->value, file);
       fprintf(file, ";");
     }
-    stringPop(&name, len+1);
+    string_pop(&name, len+1);
   }
 }
 internal void compile_struct_init_to_c(ExpressionAST* expr, StructInitializationAST* init, FILE* file, bool mangle) {
   /* TODO: check for lvalue */
   if (expr->expr_type == VARIABLE_GET_EXPR) {
-    String s;
-    stringInit(&s, mangle ? "v_" : "");
-    stringAppend(&s, ((VariableGetAST*) expr)->name);
+    String s = string_create(mangle ? "v_" : "");
+    string_append(&s, ((VariableGetAST*) expr)->name);
     _compile_struct_init_to_c(s, init, file);
-    stringFree(&s);
+    string_free(&s);
   }
   else if (expr->expr_type == MEMBER_ACCESS_EXPR) {
     String chain = get_member_access_chain((MemberAccessAST*) expr);
     _compile_struct_init_to_c(chain, init, file);
-    stringFree(&chain);
+    string_free(&chain);
   }
 }
 
@@ -2304,6 +2422,7 @@ internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
 
     case LOOP_STMT: {
       LoopAST* loop = (LoopAST*) stmt;
+      int i;
 
       /* ranged based loop? */
       if (loop->to) {
@@ -2376,7 +2495,7 @@ internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
           }
         }
       }
-      for (int i = 0; i < loop->body.num_statements; ++i) {
+      for (i = 0; i < loop->body.num_statements; ++i) {
         compile_statement_to_c(loop->body.statements[i], file);
       }
       fprintf(file, "\n};");
@@ -2437,7 +2556,7 @@ internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
         }
       } else {
         /* TODO: pretty-print expression types */
-        logErrorAt(ass->stmt.pos, "Assignment to expression of type %i is not allowed\n", ass->lhs->expr_type);
+        jai_log_at(ERROR, ass->stmt.pos, "Assignment to expression of type %i is not allowed\n", ass->lhs->expr_type);
       }
     } break;
 
@@ -2467,15 +2586,16 @@ internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
     } break;
 
     case UNKNOWN_STMT: {
-      logDebugError("Trying to compile an unknown statement type???\n");
+      jai_log(DEBUG_ERROR, "Trying to compile an unknown statement type???\n");
     } break;
 
   }
 }
 
 internal void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
+  int i;
   fprintf(file, "{");
-  for (int i = 0; i < block->num_statements; ++i) {
+  for (i = 0; i < block->num_statements; ++i) {
     compile_statement_to_c(block->statements[i], file);
   }
   fprintf(file, "\n};\n");
@@ -2497,14 +2617,14 @@ int main(int argc, char const *argv[]) {
   #endif
 
   if (argc == 1) {
-    logErrorAt(prev_pos, "Usage: %s <filename>\n", argv[0]);
+    jai_log_at(ERROR, prev_pos, "Usage: %s <filename>\n", argv[0]);
     return 1;
   }
   else {
     next_pos.file = (char*) argv[1];
     file = fopen(argv[1], "r");
     if (!file) {
-      logErrorAt(prev_pos, "Could not open file %s\n", argv[1]);
+      jai_log_at(ERROR, prev_pos, "Could not open file %s\n", argv[1]);
       return 1;
     }
   }
@@ -2518,9 +2638,10 @@ int main(int argc, char const *argv[]) {
 
   /* init globals */
   {
-    arenaInit(&perm_arena);
-    arrayInit(&generated_types, 32, sizeof(Type*));
-    stringInit(&_print_buf, 0);
+    perm_arena = arena_create();
+    generated_types = array_create(32, sizeof(Type*));
+    _print_buf = string_create(0);
+    _print_buf = string_create(0);
     void_type_ast.name = "void";
     builtin_types[1].type = VOID_TYPE;
     builtin_types[2].type = INT_TYPE;
@@ -2541,12 +2662,12 @@ int main(int argc, char const *argv[]) {
   /** Parsing **/
 
   {
-    CompoundStatementAST* global_scope = arenaPush(&perm_arena, sizeof(CompoundStatementAST));
-    DynArray statements;/* StatementAST* */
+    CompoundStatementAST* global_scope = arena_push(&perm_arena, sizeof(CompoundStatementAST));
+    DynArray statements = array_create(32, sizeof(StatementAST*));
 
     eatToken();
     global_scope->stmt.type = COMPOUND_STMT;
-    arrayInit(&statements, 32, sizeof(StatementAST*));
+    
 
     while (token != TOK_EOF) {
       StatementAST* stmt = parseStatement();
@@ -2555,19 +2676,19 @@ int main(int argc, char const *argv[]) {
           case FUNCTION_DECLARATION_STMT: {
             FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
             fun->body.parent_scope = global_scope;
-            arrayPushVal(&statements, &stmt);
-            logDebugInfo("Adding function definition %s\n", ((FunctionDeclarationAST*) stmt)->name);
+            array_pushVal(&statements, &stmt);
+            jai_log(DEBUG_INFO, "Adding function definition %s\n", ((FunctionDeclarationAST*) stmt)->name);
           } break;
           case VARIABLE_DECLARATION_STMT: {
-            arrayPushVal(&statements, &stmt);
-            logDebugInfo("Adding variable declaration %s with declared type %s\n", ((VariableDeclarationAST*) stmt)->name, print_type_ast_name(((VariableDeclarationAST*) stmt)->type_ast));
+            array_pushVal(&statements, &stmt);
+            jai_log(DEBUG_INFO, "Adding variable declaration %s with declared type %s\n", ((VariableDeclarationAST*) stmt)->name, print_type_ast_name(((VariableDeclarationAST*) stmt)->type_ast));
           } break;
           case STRUCT_DECLARATION_STMT: {
-            arrayPushVal(&statements, &stmt);
-            logDebugInfo("Adding type $t\n", &((StructDeclarationAST*) stmt)->str);
+            array_pushVal(&statements, &stmt);
+            jai_log(DEBUG_INFO, "Adding type $t\n", &((StructDeclarationAST*) stmt)->str);
           } break;
           default:
-            logErrorAt(stmt->pos, "Only variable, struct and function definitions allowed at global scope\n");
+            jai_log_at(ERROR, stmt->pos, "Only variable, struct and function definitions allowed at global scope\n");
             break;
         }
       } else {
@@ -2577,12 +2698,12 @@ int main(int argc, char const *argv[]) {
       }
     }
 
-    global_scope->statements = pushArrayToArena(&statements, &perm_arena);
+    global_scope->statements = arena_push_array(&statements, &perm_arena);
     global_scope->num_statements = arrayCount(&statements);
     arrayFree(&statements);
 
     if (found_error) {
-      logError("Exiting due to previous errors\n");
+      jai_log(ERROR, "Exiting due to previous errors\n");
       return 1;
     }
 
@@ -2591,7 +2712,7 @@ int main(int argc, char const *argv[]) {
     doTypeInferenceForScope(global_scope);
 
     if (found_error) {
-      logError("Exiting due to previous errors\n");
+      jai_log(ERROR, "Exiting due to previous errors\n");
       return 1;
     }
 
@@ -2638,8 +2759,7 @@ int main(int argc, char const *argv[]) {
             /* compile all structs in global scope */
             /* TODO: compile all structs and functions in all scopes */
             {
-              DynArray compiled_structs;
-              arrayInit(&compiled_structs, 16, sizeof(StructType*));
+              DynArray compiled_structs = array_create(16, sizeof(StructType*));
 
               /* write types */
               for (i = 0; i < global_scope->num_statements; ++i) {
@@ -2737,14 +2857,14 @@ int main(int argc, char const *argv[]) {
                 }
                 fclose(tail);
               } else {
-                logError("Could not open output file '/tmp/output.c'\n");
+                jai_log(ERROR, "Could not open output file '/tmp/output.c'\n");
               }
 
             }
-          } else {logError("Failed to open temp files\n"); }
-        } else {logErrorAt(jai_main->body.stmt.pos, "main must not take any arguments");}
-      } else if (arrayCount(&mains) > 1) {logError("Only one main can be defined"); }
-      else {logError("No main function declared\n"); }
+          } else {jai_log(ERROR, "Failed to open temp files\n"); }
+        } else {jai_log_at(ERROR, jai_main->body.stmt.pos, "main must not take any arguments");}
+      } else if (arrayCount(&mains) > 1) {jai_log(ERROR, "Only one main can be defined"); }
+      else {jai_log(ERROR, "No main function declared\n"); }
     }
   }
   return 0;

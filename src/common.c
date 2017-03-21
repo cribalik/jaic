@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include "terminal.c"
 #include "array.c"
 #include "memarena.c"
@@ -18,57 +19,23 @@ typedef int bool32;
 #define true 1
 #define false 0
 
+typedef struct {
+  char* file;
+  int line;
+  int column;
+  fpos_t fpos;
+} FilePos;
+
 #define ARRSIZE(arr) (int)sizeof(arr)/(int)sizeof(*arr)
 
 #define ZERO(ptr) memset(ptr, 0, sizeof(*ptr))
 
-/* Logging */
-#define logErrorAt(filepos, msg, ...) print(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column); found_error = true;
-#define logError(msg, ...) print(stderr, "%s(%s:%i): %serror:%s%s " msg, BOLD, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); found_error = true;
-#define logNote(msg, ...) print(stderr, "%s (%s:%i): %snote:%s%s " msg, BOLD, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__);
-#define logNoteAt(filepos, msg, ...) print(stderr, "%s%s:%i:%i (%s:%i): %snote:%s%s " msg, BOLD, filepos.file, filepos.line, filepos.column, __FILE__, __LINE__, BLUE, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column);
 
-#ifdef DEBUG
-#define logDebugInfo(msg, ...) print(stderr, "%s%s:%i: %sdebug:%s%s " msg, BOLD, __FILE__, __LINE__, GREEN, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__)
-#define logDebugInfoAt(filepos, msg, ...) print(stderr, "%s%s:%i: %sdebug:%s%s " msg, BOLD, __FILE__, __LINE__, GREEN, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__); printLine(stderr, filepos.file, filepos.line, filepos.column);
-#define logDebugError(msg, ...) print(stderr, "%s%s:%i: %serror:%s%s " msg, BOLD, __FILE__, __LINE__, RED, RESET_COLOR, RESET_FORMAT, ##__VA_ARGS__)
-#else
-#define logDebugInfo(msg, ...)
-#define logDebugError(msg, ...)
+#ifndef DEBUG
+  #define DEBUG 0
 #endif
 
-void printLine(FILE* out, char* filename, int line, int column) {
-  FILE* file;
-  int i = 1;
-  char c;
 
-  /* TODO: send in the file position instead so we don't need to parse the whole file? it's okay if this is slow though */
-  if (!filename) {
-    return;
-  }
 
-  file = fopen(filename, "r");
-  for (i = 1; i < line;) {
-    i += getc(file) == '\n';
-  }
-
-  fflush(out);
-  c = getc(file);
-  while (c != EOF && c != '\n') {
-    putc(c, out);
-    c = getc(file);
-  }
-  putc('\n', out);
-  for (i = 0; i < column-1; ++i) {
-    putc(' ', out);
-  }
-  putc('^', out);
-  putc('\n', out);
-  fflush(out);
-}
-
-/* Some macros */
-#define UNIMPLEMENTED logDebugError("Unimplemented function at %s:%d\n", __FILE__, __LINE__); exit(1);
-#define UNREACHABLE logDebugError("Unreachable\n"); exit(1);
 
 #endif /* JAIC_COMMON */
