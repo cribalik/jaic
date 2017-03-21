@@ -99,8 +99,8 @@ internal void jai_log_at(_LogType type, char* file, int line, FilePos filepos, c
     case _LOG_DEBUG_INFO: {
       if (DEBUG) {
         fprintf(stderr, "%s%s:%i:%i (%s:%i): %sdebug:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, GREEN, RESET_COLOR, RESET_FORMAT);
-        printLine(stderr, filepos.file, filepos.line, filepos.column);
         vprint(stderr, fmt, args);
+        printLine(stderr, filepos.file, filepos.line, filepos.column);
       }
     } break;
     case _LOG_DEBUG_ERROR: {
@@ -2657,6 +2657,8 @@ int main(int argc, char const *argv[]) {
     builtin_types[12].type = I32_TYPE;
     builtin_types[13].type = I64_TYPE;
     builtin_types[14].type = USIZE_TYPE;
+    prev_pos.line = 1;
+    next_pos.line = 1;
   }
 
   /** Parsing **/
