@@ -28,14 +28,4 @@ typedef struct {
 
 #define ARRSIZE(arr) (int)sizeof(arr)/(int)sizeof(*arr)
 
-#define ZERO(ptr) memset(ptr, 0, sizeof(*ptr))
-
-
-#ifndef DEBUG
-  #define DEBUG 0
-#endif
-
-
-
-
 #endif /* JAIC_COMMON */

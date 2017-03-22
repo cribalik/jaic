@@ -30,20 +30,21 @@ internal String string_create(char* initial_value) {
 }
 
 internal int string_prepend(String* a, char* b) {
-  int len;
+  int len, old_len;
   char* next;
   assert(a->chars.count > 0);
   len = strlen(b);
+  old_len = a->chars.count;
   /* move current string to end */
   next = array_pushN(&a->chars, len);
-  --next;
-  memmove(next, a->chars.data, a->chars.count - 1);
-  *(char*)arrayLast(&a->chars) = 0;
+  next -= 2;
+  memmove(next, a->chars.data, old_len);
 
   /* prepend new string */
   next = a->chars.data;
   while (*b) {
-    *next++ = *b++;
+    *next = *b;
+    ++next, ++b;
   }
   return len;
 }
@@ -55,7 +56,7 @@ internal void string_pop(String* s, int n) {
 }
 
 internal char* string_get(String* s) {
-  return arrayBegin(&s->chars);
+  return array_begin(&s->chars);
 }
 
 internal char* string_clear(String* s) {

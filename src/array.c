@@ -68,7 +68,7 @@ internal void* array_pushVal(DynArray* arr, void* in) {
   return arrayLast(arr);
 }
 
-internal void* arrayBegin(DynArray* arr) {
+internal void* array_begin(DynArray* arr) {
   return arr->data;
 }
 

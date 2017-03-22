@@ -71,6 +71,9 @@ global bool found_error = false;
  * jai_log_at(ERROR, "value was %i", 3);
  * jai_log_at(DEBUG_INFO, "value was %i, that makes me %s", 5, happy ? "happy" : "sad");
  */
+#ifndef DEBUG
+  #define DEBUG 0
+#endif
 #define ERROR _LOG_USER_ERROR,__FILE__,__LINE__
 #define NOTE _LOG_USER_INFO,__FILE__,__LINE__
 #define DEBUG_INFO _LOG_DEBUG_INFO,__FILE__,__LINE__
@@ -571,6 +574,13 @@ typedef struct PointerType {
   Type* base_type;
 } PointerType;
 
+PointerType create_pointer_type(Type* base_type) {
+  PointerType p = {0};
+  p.type.type = POINTER_TYPE;
+  p.base_type = base_type;
+  return p;
+}
+
 /* Expressions */
 
 typedef enum ExpressionType {
@@ -636,6 +646,14 @@ typedef struct VariableGetAST {
   char* name;
 } VariableGetAST;
 
+internal VariableGetAST create_variable_get_ast(char *name, Type* type) {
+  VariableGetAST result = {0};
+  result.expr.expr_type = VARIABLE_GET_EXPR;
+  result.expr.type = type;
+  result.name = name;
+  return result;
+}
+
 struct FunctionDeclarationAST;
 typedef struct CallAST {
   ExpressionAST expr;
@@ -650,6 +668,14 @@ typedef struct ArraySubscriptAST {
   ExpressionAST* base;
   ExpressionAST* subscript;
 } ArraySubscriptAST;
+
+ArraySubscriptAST create_array_subscript_ast(ExpressionAST* base, ExpressionAST* subscript) {
+  ArraySubscriptAST as = {0};
+  as.expr.expr_type = ARRAY_SUBSCRIPT_EXPR;
+  as.base = base;
+  as.subscript = subscript;
+  return as;
+}
 
 typedef struct BinaryExpressionAST {
   ExpressionAST expr;
@@ -1531,7 +1557,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
             assert(constant->expr.expr_type == LITERAL_EXPR);
             if (constant->expr.type->type == INT_TYPE) {
               Type **it, **end;
-              for (it = arrayBegin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
+              for (it = array_begin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
                 StaticArrayType* sa = (StaticArrayType*) *it;
                 /* TODO: not int, size_t */ 
                 if ((*it)->type == STATIC_ARRAY_TYPE && sa->arr.base_type == base_type && sa->size == constant->value.int_val) {
@@ -1566,7 +1592,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
         if (base_type) {
           ArrayType* result = 0;
           Type **it, **end;
-          for (it = arrayBegin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
+          for (it = array_begin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
             if ((*it)->type == ARRAY_TYPE && ((ArrayType*) *it)->base_type == base_type) {
               result = (ArrayType*) *it;
               break;
@@ -1596,7 +1622,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
         if (base_type) {
           PointerType* result = 0;
           Type **it, **end;
-          for (it = arrayBegin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
+          for (it = array_begin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
             if ((*it)->type == POINTER_TYPE && ((PointerType*) *it)->base_type == base_type) {
               result = (PointerType*) *it;
               break;
@@ -1695,7 +1721,7 @@ internal void _evaluateTypeOfStruct(StructType* str, DynArray* parents, Compound
       }
       if (str->members[i].type->type == STRUCT_TYPE && str->members[i].type_ast.num_partial_types == 0) {
         char **parent, **end;
-        for (parent = arrayBegin(parents), end = arrayEnd(parents); parent != end; ++parent) {
+        for (parent = array_begin(parents), end = arrayEnd(parents); parent != end; ++parent) {
           if (strcmp(*parent, str->members[i].type_ast.name) == 0) {
             jai_log_at(ERROR, str->members[i].pos, "TypeClass %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
             exit(1);
@@ -1825,7 +1851,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
           /* eval functions and find best match */
           int matches = 0;
           FunctionDeclarationAST **it, **end;
-          for (it = arrayBegin(&funs), end = arrayEnd(&funs); it < end; ++it) {
+          for (it = array_begin(&funs), end = arrayEnd(&funs); it < end; ++it) {
             FunctionDeclarationAST* fun = *it;
             bool match = true;
             if (!fun->return_type && fun->return_type_ast.name) {
@@ -1855,13 +1881,13 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
             /* TODO: print out actual matches, and not all overload */
             jai_log_at(ERROR, expr->stmt.pos, "Multiple matching overloads for %s.\n", base->name);
             jai_log(NOTE, "Overloads are:\n");
-            for (it = arrayBegin(&funs), end = arrayEnd(&funs); it < end; ++it) {
+            for (it = array_begin(&funs), end = arrayEnd(&funs); it < end; ++it) {
               jai_log_at(NOTE, (*it)->pos, "\n");
             }
           } else if (matches == 0) {
             jai_log_at(ERROR, expr->stmt.pos, "Could not find matching function overload for %s.\n", base->name);
             jai_log(NOTE, "Alternatives are:\n");
-            for (it = arrayBegin(&funs), end = arrayEnd(&funs); it < end; ++it) {
+            for (it = array_begin(&funs), end = arrayEnd(&funs); it < end; ++it) {
               jai_log_at(NOTE, (*it)->pos, "\n");
             }
           }
@@ -2223,34 +2249,42 @@ internal void print(FILE* file, char* fmt, ...) {
 
 internal void compile_variable_decl_to_c(Type* type, char* name, bool prefix, FILE* file) {
   /* We handle the types, C only needs to know the size of the static allocation */
-  /* ^^[32][8]int      ->   void* name; (pointer size) */
-  /* [32][8]^[64]^int  ->   void* name[32][8] (32*8*pointer size) */
+  /* ^^[32][8]int */
+  /* int (*(*name))[32][8] */
+  /* [32]^[64]^int */
+  /* int (*name[32]) */
   /* [32][8]int        ->   int name[32][8] */
   /* [][32]int         ->   Slice name; */
   char* var_prefix = prefix ? "v_" : "";
+  String s = string_create(var_prefix);
+  string_append(&s, name);
 
-  if (type->type == POINTER_TYPE) {
-    fprintf(file, "\nT_void* %s%s", var_prefix, name);
-  } else {
-    int num_items = 1;
-    while (type->type == STATIC_ARRAY_TYPE) {
-      StaticArrayType* sa = (StaticArrayType*) type;
-      num_items *= sa->size;
-      type = sa->arr.base_type;
-    }
-
-    print(file, "\n$T %s%s", type, var_prefix, name);
-
-    if (num_items > 1) {
-      fprintf(file, "[%i]", num_items);
+  while (1) {
+    if (type->type == POINTER_TYPE) {
+      string_prepend(&s, "(*");
+      string_append_char(&s, ')');
+      type = ((PointerType*) type)->base_type;
+    } else if (type->type == STATIC_ARRAY_TYPE) {
+      StaticArrayType* a = (StaticArrayType*) type;
+      char buf[16];
+      sprintf(buf, "%i", a->size);
+      string_append_char(&s, '[');
+      string_append(&s, buf);
+      string_append_char(&s, ']');
+      type = a->arr.base_type;
+    } else {
+      print(file, "\n$T %s", type, string_get(&s));
+      break;
     }
   }
+
+  string_free(&s);
 }
 
 internal void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArray* done) {
   StructType **s, **end;
   int i;
-  for (s = arrayBegin(done), end = arrayEnd(done); s != end; ++s) {
+  for (s = array_begin(done), end = arrayEnd(done); s != end; ++s) {
     if (*s == str) {
       return;
     }
@@ -2305,11 +2339,9 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
     } break;
 
     case ARRAY_SUBSCRIPT_EXPR: {
-      /* CONTINUE - We collapse consecutive static array sizes. Calculate the resulting offset of an array subscript */
       ArraySubscriptAST* as = (ArraySubscriptAST*) expr;
-      print(body, "(", as->base->type);
       compile_expression_to_c(as->base, body);
-      fprintf(body, ")[");
+      fprintf(body, "[");
       compile_expression_to_c(as->subscript, body);
       fprintf(body, "]");
     } break;
@@ -2455,44 +2487,26 @@ internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
       }
       /* array loop? */
       else {
+        if (!loop->index.name) {
+          loop->index.name = "index";
+        }
         if (loop->from->type->type == STATIC_ARRAY_TYPE) {
-          if (loop->index.name) {
-            fprintf(file, "\nfor (int v_%s = 0; v_%s < %i; ++v_%s) {", loop->index.name, loop->index.name, ((StaticArrayType*) loop->from->type)->size, loop->index.name);
-          } else {
-            fprintf(file, "\nfor (int it_index = 0; it_index < %i; ++it_index) {", ((StaticArrayType*) loop->from->type)->size);
-          }
+          fprintf(file, "\nfor (int v_%s = 0; v_%s < %i; ++v_%s) {", loop->index.name, loop->index.name, ((StaticArrayType*) loop->from->type)->size, loop->index.name);
         }
         else if (loop->from->type->type == ARRAY_TYPE) {
-          if (loop->index.name) {
-            fprintf(file, "\nfor (int v_%s = 0, end_index = ", loop->index.name);
-          } else {
-            fprintf(file, "\nfor (int it_index = 0, end_index = ");
-          }
+          fprintf(file, "\nfor (int v_%s = 0, end_index = ", loop->index.name);
           compile_expression_to_c(loop->from, file);
-          fprintf(file, ".length; ");
-          if (loop->index.name) {
-            fprintf(file, "v_%s < end_index; ++v_%s) {", loop->index.name, loop->index.name);
-          } else {
-            fprintf(file, "it_index < end_index; ++it_index) {");
-          }
+          fprintf(file, ".length; v_%s < end_index; ++v_%s) {", loop->index.name, loop->index.name);
         } else {assert(false);}
 
         /* get array element */
         if (loop->iter.name) {
-          ArrayType* arr = (ArrayType*) loop->from->type;
-          compile_variable_decl_to_c(arr->base_type, loop->iter.name, true, file);
-          print(file, " = (($T*) ", arr->base_type);
-          compile_expression_to_c(loop->from, file);
-          if (loop->from->type->type == ARRAY_TYPE) {
-            fprintf(file, ".data");
-          }
-          fputc(')', file);
-
-          if (loop->index.name) {
-            fprintf(file, "[v_%s];", loop->index.name);
-          } else {
-            fprintf(file, "[it_index];");
-          }
+          VariableGetAST index = create_variable_get_ast(loop->index.name, loop->index.type);
+          ArraySubscriptAST sub = create_array_subscript_ast(loop->from, &index.expr);
+          compile_variable_decl_to_c(loop->iter.type, loop->iter.name, true, file);
+          fprintf(file, ";\nmemcpy(&v_%s, &", loop->iter.name);
+          compile_expression_to_c(&sub.expr, file);
+          fprintf(file, ", sizeof(v_%s));", loop->iter.name);
         }
       }
       for (i = 0; i < loop->body.num_statements; ++i) {
@@ -2601,20 +2615,14 @@ internal void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
   fprintf(file, "\n};\n");
 }
 
-/** Compile AST to LLVM */
-/*
-internal void compile_to_llvm() {
-  UNIMPLEMENTED;
-}
-*/
-
 /** Main **/
 
 int main(int argc, char const *argv[]) {
 
-  #ifdef DEBUG
-    test();
-  #endif
+# ifdef DEBUG
+  test();
+# endif
+
 
   if (argc == 1) {
     jai_log_at(ERROR, prev_pos, "Usage: %s <filename>\n", argv[0]);
@@ -2753,7 +2761,8 @@ int main(int argc, char const *argv[]) {
               "typedef void T_void;\n\n"
             );
             fprintf(header,
-              "void* memset( void* dest, int ch, size_t count );\n\n"
+              "void* memset( void* dest, int ch, size_t count );\n"
+              "void* memcpy( void* dest, const void* src, size_t count );\n\n"
               "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
               "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n"
             );
