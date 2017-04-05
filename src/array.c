@@ -58,63 +58,49 @@ internal void* array_pushN(DynArray* arr, int n) {
   return ((char*) arr->data) + (arr->item_size * (arr->count - n));
 }
 
-internal void* arrayLast(DynArray* arr) {
+internal void* array_last(DynArray* arr) {
   return ((char*) arr->data) + (arr->count - 1) * arr->item_size;
 }
 
-internal void* array_pushVal(DynArray* arr, void* in) {
+internal void* array_push_val(DynArray* arr, void* in) {
   void* r = array_push(arr);
   memcpy(r, in, arr->item_size);
-  return arrayLast(arr);
+  return array_last(arr);
 }
 
 internal void* array_begin(DynArray* arr) {
   return arr->data;
 }
 
-internal void* arrayEnd(DynArray* arr) {
+internal void* array_end(DynArray* arr) {
   return ((char*) arr->data) + (arr->count * arr->item_size);
 }
 
-internal void* arrayGet(DynArray* arr, int i) {
+internal void* array_get(DynArray* arr, int i) {
   return ((char*) arr->data) + (arr->item_size * i);
 }
 
-internal void arrayPop(DynArray* arr) {
+internal void array_pop(DynArray* arr) {
   assert(arr->count > 0);
   --arr->count;
 }
 
-internal void arrayPopN(DynArray* arr, int n) {
+internal void array_pop_N(DynArray* arr, int n) {
   assert(arr->count >= n);
   arr->count -= n;
 }
 
-internal int arrayCount(DynArray* arr) {
+internal int array_count(DynArray* arr) {
   return arr->count;
 }
-#define arraySize arrayCount
+#define arraySize array_count
 
-internal void arrayGetData(DynArray* arr, void** data, int* size) {
-  *data = arr->data;
-  *size = arr->count * arr->item_size;
-}
-
-internal int arrayCapacity(DynArray* arr) {
-  return arr->capacity;
-}
-
-internal void arrayFree(DynArray* arr) {
+internal void array_free(DynArray* arr) {
   free(arr->data);
-  arr->capacity = 0;
   arr->data = 0;
+  arr->capacity = 0;
   arr->count = 0;
 }
-/*
-internal void arrayFree(DynArray* arr) {
-  free(arr->data);
-}
-*/
 
 internal Array array_to_array(DynArray* arr) {
   Array result;
@@ -129,41 +115,41 @@ internal void arrayTest() {
   {
     DynArray a;
     a = array_create(30, sizeof(int));
-    assert(arrayCount(&a) == 0);
-    assert(arrayCapacity(&a) == 30);
+    assert(array_count(&a) == 0);
+    assert(a.capacity == 30);
     *(int*)array_push(&a) = 100;
-    assert(arrayCount(&a) == 1);
-    assert(arrayCapacity(&a) == 30);
-    assert(*(int*)arrayGet(&a, 0) == 100);
+    assert(array_count(&a) == 1);
+    assert(a.capacity == 30);
+    assert(*(int*)array_get(&a, 0) == 100);
     *(int*)array_push(&a) = 202;
-    assert(arrayCount(&a) == 2);
-    assert(arrayCapacity(&a) == 30);
-    assert(*(int*)arrayGet(&a, 0) == 100);
-    assert(*(int*)arrayGet(&a, 1) == 202);
-    *(int*)arrayGet(&a, 0) = 300;
-    assert(*(int*)arrayGet(&a, 0) == 300);
-    assert(*(int*)arrayGet(&a, 1) == 202);
-    arrayFree(&a);
+    assert(array_count(&a) == 2);
+    assert(a.capacity == 30);
+    assert(*(int*)array_get(&a, 0) == 100);
+    assert(*(int*)array_get(&a, 1) == 202);
+    *(int*)array_get(&a, 0) = 300;
+    assert(*(int*)array_get(&a, 0) == 300);
+    assert(*(int*)array_get(&a, 1) == 202);
+    array_free(&a);
   }
 
   {
     DynArray a;
     a = array_create(0, sizeof(int));
-    assert(arrayCount(&a) == 0);
-    assert(arrayCapacity(&a) == 0);
+    assert(array_count(&a) == 0);
+    assert(a.capacity == 0);
     array_push(&a);
-    assert(arrayCount(&a) == 1);
-    assert(arrayCapacity(&a) == 4);
+    assert(array_count(&a) == 1);
+    assert(a.capacity == 4);
     array_push(&a);
-    assert(arrayCount(&a) == 2);
-    assert(arrayCapacity(&a) == 4);
+    assert(array_count(&a) == 2);
+    assert(a.capacity == 4);
     array_push(&a);
-    assert(arrayCount(&a) == 3);
-    assert(arrayCapacity(&a) == 4);
+    assert(array_count(&a) == 3);
+    assert(a.capacity == 4);
     array_push(&a);
-    assert(arrayCount(&a) == 4);
-    assert(arrayCapacity(&a) == 8);
-    arrayFree(&a);
+    assert(array_count(&a) == 4);
+    assert(a.capacity == 8);
+    array_free(&a);
   }
 
 }

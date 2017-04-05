@@ -2,7 +2,6 @@
 #include <assert.h>
 #include <string.h>
 
-
 typedef struct String {
   DynArray chars;
 } String;
@@ -51,8 +50,8 @@ internal int string_prepend(String* a, char* b) {
 
 internal void string_pop(String* s, int n) {
   assert(s->chars.count > n);
-  arrayPopN(&s->chars, n);
-  *(char*)arrayLast(&s->chars) = 0;
+  array_pop_N(&s->chars, n);
+  *(char*)array_last(&s->chars) = 0;
 }
 
 internal char* string_get(String* s) {
@@ -61,12 +60,12 @@ internal char* string_get(String* s) {
 
 internal char* string_clear(String* s) {
   s->chars.count = 1;
-  *(char*)arrayLast(&s->chars) = 0;
+  *(char*)array_last(&s->chars) = 0;
   return s->chars.data;
 }
 
 internal void string_free(String* s) {
-  arrayFree(&s->chars);
+  array_free(&s->chars);
 }
 
 internal void string_append_char(String* s, char c) {

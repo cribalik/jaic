@@ -35,7 +35,7 @@ fn overfun(a: int, b: float) {};
 var result = overfun(1, 1.0);
 
 var some_identifier = 3;
-// some_identifier := type {a:int}; // identifiers must be unique, this should error
+// type some_identifier {a:int} // identifiers must be unique, this should error
 
 // some structs
 type compound {
@@ -62,7 +62,7 @@ type vec2 {
 // some nested structs
 type B {
   v: vec2
-  // a: A; // will cause error because A will contain itself
+  // a: A // will cause error because A will contain itself
 }
 
 type A {
@@ -109,16 +109,21 @@ fn should_not_compile() : int {
 
 fn main() {
 
-  // this should be allowed for pointer type but not for scalar type
+  // this should be allowed for r-value but not for l-value
   // newRichMonster().gold = 3
 
-  var arr: [2][2]int
-  arr[0][0] = 1
-  arr[1][0] = 1
+  var m: Monster = {gold = 3}
+  putchar(56 + m.gold)
 
-  for a : arr {
+  var arr: [2][2]int
+  arr[0][1] = 1
+  arr[1][0] = 2
+  arr[1][1] = 3
+
+  for a,i : arr {
+    putchar(56 + i);
     for b : a {
-      putchar(54 + b)
+      putchar(97 + b) // should print abcd
     }
   }
 

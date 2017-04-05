@@ -774,17 +774,17 @@ internal int parse_block(CompoundStatementAST* result, DynArray* prefix) {
     }
     stmt = parseStatement();
     if (stmt) {
-      array_pushVal(array, &stmt);
+      array_push_val(array, &stmt);
     } else {
       jai_log_at(ERROR, prev_pos, "Failed to parse statement\n");
-      arrayFree(array);
+      array_free(array);
       return 1;
     }
   }
-  result->num_statements = arrayCount(array);
+  result->num_statements = array_count(array);
   result->statements = arena_push_array(array, &perm_arena);
   result->stmt.type = COMPOUND_STMT;
-  arrayFree(array);
+  array_free(array);
   return 0;
 }
 
@@ -848,11 +848,11 @@ internal ExpressionAST* parsePrimitive() {
             expr = parseExpression();
             if (!expr) {
               jai_log_at(ERROR, prev_pos, "Invalid expression inside function call\n");
-              arrayFree(&args);
+              array_free(&args);
               return 0;
             }
 
-            array_pushVal(&args, &expr);
+            array_push_val(&args, &expr);
 
             if (token == ')') {
               eatToken();
@@ -865,11 +865,11 @@ internal ExpressionAST* parsePrimitive() {
             }
           }
 
-          call->num_args = arrayCount(&args);
+          call->num_args = array_count(&args);
           if (call->num_args > 0) {
             call->args = arena_push_array(&args, &perm_arena);
           }
-          arrayFree(&args);
+          array_free(&args);
 
           jai_log(DEBUG_INFO, "Found function call with %i inputs\n", call->num_args);
           result = &call->expr;
@@ -975,9 +975,9 @@ internal ExpressionAST* parsePrimitive() {
         }
         if (ast) {
           ast->members = arena_push_array(&members, &perm_arena);
-          ast->num_members = arrayCount(&members);
+          ast->num_members = array_count(&members);
         }
-        arrayFree(&members);
+        array_free(&members);
       } else {
         eatToken();
       }
@@ -1065,7 +1065,7 @@ internal bool parseType(TypeAST* result) {
       break;
     }
 
-    arrayFree(&partial_types);
+    array_free(&partial_types);
     return false;
   }
 
@@ -1079,11 +1079,11 @@ internal bool parseType(TypeAST* result) {
     return false;
   }
 
-  if (arrayCount(&partial_types)) {
-    result->num_partial_types = arrayCount(&partial_types);
+  if (array_count(&partial_types)) {
+    result->num_partial_types = array_count(&partial_types);
     result->partial_types = arena_push_array(&partial_types, &perm_arena);
   }
-  arrayFree(&partial_types);
+  array_free(&partial_types);
 
   return true;
 }
@@ -1148,15 +1148,15 @@ internal StatementAST* _parseStatement() {
               }
               stmt = parseStatement();
               if (stmt) {
-                array_pushVal(&statements, &stmt);
+                array_push_val(&statements, &stmt);
               } else {
                 jai_log_at(ERROR, prev_pos, "Failed to parse statement in loop body\n");
                 break;
               }
             }
-            loop->body.num_statements = arrayCount(&statements);
+            loop->body.num_statements = array_count(&statements);
             loop->body.statements = arena_push_array(&statements, &perm_arena);
-            arrayFree(&statements);
+            array_free(&statements);
             return &loop->body.stmt;
           } else {
             jai_log_at(ERROR, prev_pos, "Expected block after loop. Did you forget '{'?\n");
@@ -1229,12 +1229,12 @@ internal StatementAST* _parseStatement() {
               } else {jai_log_at(ERROR, prev_pos, "Type expected after ':'\n");}
             } else {jai_log_at(ERROR, prev_pos, "No type found after parameter name (did you forget a ':'?\n");}
           } else {jai_log_at(ERROR, prev_pos, "Identifier expected in parameter list, found %s\n", print_token());}
-          arrayFree(&args);
+          array_free(&args);
           return 0;
         }
-        fun->num_args = arrayCount(&args);
+        fun->num_args = array_count(&args);
         fun->args = arena_push_array(&args, &perm_arena);
-        arrayFree(&args);
+        array_free(&args);
 
         /* return value */
         if (token == ':') {
@@ -1271,17 +1271,17 @@ internal StatementAST* _parseStatement() {
               } else {
                 StatementAST* stmt = parseStatement();
                 if (stmt) {
-                  array_pushVal(&statements, &stmt);
+                  array_push_val(&statements, &stmt);
                   continue;
                 } else {jai_log_at(ERROR, prev_pos, "Failed to parse statement in %s\n", fun->name);}
               }
               goto_matching_brace();
-              arrayFree(&statements);
+              array_free(&statements);
               return 0;
             }
-            fun->body.num_statements = arrayCount(&statements);
+            fun->body.num_statements = array_count(&statements);
             fun->body.statements = arena_push_array(&statements, &perm_arena);
-            arrayFree(&statements);
+            array_free(&statements);
 
           } else {jai_log_at(ERROR, prev_pos, "No '{' or '#foreign' found after function parameter list\n");}
 
@@ -1333,13 +1333,13 @@ internal StatementAST* _parseStatement() {
             eatToken();
           }
           eatToken();
-          arrayFree(&members);
+          array_free(&members);
           return 0;
         }
 
-        decl->str.num_members = arrayCount(&members);
+        decl->str.num_members = array_count(&members);
         decl->str.members = arena_push_array(&members, &perm_arena);
-        arrayFree(&members);
+        array_free(&members);
         return &decl->stmt;
       } else {jai_log_at(ERROR, pos_of_identifier, "Expected '{' after struct keyword\n");}
     } else {jai_log_at(ERROR, prev_pos, "Expected struct name, got %s", print_token());}
@@ -1557,7 +1557,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
             assert(constant->expr.expr_type == LITERAL_EXPR);
             if (constant->expr.type->type == INT_TYPE) {
               Type **it, **end;
-              for (it = array_begin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
+              for (it = array_begin(&generated_types), end = array_end(&generated_types); it < end; ++it) {
                 StaticArrayType* sa = (StaticArrayType*) *it;
                 /* TODO: not int, size_t */ 
                 if ((*it)->type == STATIC_ARRAY_TYPE && sa->arr.base_type == base_type && sa->size == constant->value.int_val) {
@@ -1572,7 +1572,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
                 result->arr.type.type = STATIC_ARRAY_TYPE;
                 result->arr.base_type = base_type;
                 result->size = constant->value.int_val;
-                array_pushVal(&generated_types, &result);
+                array_push_val(&generated_types, &result);
               }
 
               return (Type*) result;
@@ -1592,7 +1592,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
         if (base_type) {
           ArrayType* result = 0;
           Type **it, **end;
-          for (it = array_begin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
+          for (it = array_begin(&generated_types), end = array_end(&generated_types); it < end; ++it) {
             if ((*it)->type == ARRAY_TYPE && ((ArrayType*) *it)->base_type == base_type) {
               result = (ArrayType*) *it;
               break;
@@ -1604,7 +1604,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
             result = arena_push(&perm_arena, sizeof(ArrayType));
             result->type.type = ARRAY_TYPE;
             result->base_type = base_type;
-            array_pushVal(&generated_types, &result);
+            array_push_val(&generated_types, &result);
           }
 
           return &result->type;
@@ -1622,7 +1622,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
         if (base_type) {
           PointerType* result = 0;
           Type **it, **end;
-          for (it = array_begin(&generated_types), end = arrayEnd(&generated_types); it < end; ++it) {
+          for (it = array_begin(&generated_types), end = array_end(&generated_types); it < end; ++it) {
             if ((*it)->type == POINTER_TYPE && ((PointerType*) *it)->base_type == base_type) {
               result = (PointerType*) *it;
               break;
@@ -1633,7 +1633,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
             result = arena_push(&perm_arena, sizeof(PointerType));
             result->type.type = POINTER_TYPE;
             result->base_type = base_type;
-            array_pushVal(&generated_types, &result);
+            array_push_val(&generated_types, &result);
           }
 
           return &result->type;
@@ -1657,7 +1657,7 @@ internal DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scop
       if (stmt->type == FUNCTION_DECLARATION_STMT) {
         FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
         if (strcmp(fun->name, name) == 0) {
-          array_pushVal(&funs, &fun);
+          array_push_val(&funs, &fun);
         }
       }
     }
@@ -1721,24 +1721,24 @@ internal void _evaluateTypeOfStruct(StructType* str, DynArray* parents, Compound
       }
       if (str->members[i].type->type == STRUCT_TYPE && str->members[i].type_ast.num_partial_types == 0) {
         char **parent, **end;
-        for (parent = array_begin(parents), end = arrayEnd(parents); parent != end; ++parent) {
+        for (parent = array_begin(parents), end = array_end(parents); parent != end; ++parent) {
           if (strcmp(*parent, str->members[i].type_ast.name) == 0) {
-            jai_log_at(ERROR, str->members[i].pos, "TypeClass %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
+            jai_log_at(ERROR, str->members[i].pos, "Type %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
             exit(1);
           }
         }
-        array_pushVal(parents, &str->members[i].type_ast.name);
+        array_push_val(parents, &str->members[i].type_ast.name);
         _evaluateTypeOfStruct((StructType*) str->members[i].type, parents, scope);
-        arrayPop(parents);
+        array_pop(parents);
       }
     }
   }
 }
 internal void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope) {
   DynArray parents = array_create(4, sizeof(char*));
-  array_pushVal(&parents, &str->name);
+  array_push_val(&parents, &str->name);
   _evaluateTypeOfStruct(str, &parents, scope);
-  arrayFree(&parents);
+  array_free(&parents);
 }
 
 internal bool hasImplicitConversion(Type* from, Type* to) {
@@ -1847,11 +1847,11 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
       if (call->base->expr_type == VARIABLE_GET_EXPR) {
         VariableGetAST* base = (VariableGetAST*) call->base;
         DynArray funs = getFunctionDeclarations(base->name, scope);
-        if (arrayCount(&funs)) {
+        if (array_count(&funs)) {
           /* eval functions and find best match */
           int matches = 0;
           FunctionDeclarationAST **it, **end;
-          for (it = array_begin(&funs), end = arrayEnd(&funs); it < end; ++it) {
+          for (it = array_begin(&funs), end = array_end(&funs); it < end; ++it) {
             FunctionDeclarationAST* fun = *it;
             bool match = true;
             if (!fun->return_type && fun->return_type_ast.name) {
@@ -1881,20 +1881,20 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
             /* TODO: print out actual matches, and not all overload */
             jai_log_at(ERROR, expr->stmt.pos, "Multiple matching overloads for %s.\n", base->name);
             jai_log(NOTE, "Overloads are:\n");
-            for (it = array_begin(&funs), end = arrayEnd(&funs); it < end; ++it) {
+            for (it = array_begin(&funs), end = array_end(&funs); it < end; ++it) {
               jai_log_at(NOTE, (*it)->pos, "\n");
             }
           } else if (matches == 0) {
             jai_log_at(ERROR, expr->stmt.pos, "Could not find matching function overload for %s.\n", base->name);
             jai_log(NOTE, "Alternatives are:\n");
-            for (it = array_begin(&funs), end = arrayEnd(&funs); it < end; ++it) {
+            for (it = array_begin(&funs), end = array_end(&funs); it < end; ++it) {
               jai_log_at(NOTE, (*it)->pos, "\n");
             }
           }
 
         } else {jai_log_at(ERROR, call->expr.stmt.pos, "Unknown function '%s'\n", base->name); }
 
-        arrayFree(&funs);
+        array_free(&funs);
 
       } else {jai_log_at(ERROR, call->expr.stmt.pos, "Functions pointers not yet supported\n");}
     } break;
@@ -2284,12 +2284,12 @@ internal void compile_variable_decl_to_c(Type* type, char* name, bool prefix, FI
 internal void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArray* done) {
   StructType **s, **end;
   int i;
-  for (s = array_begin(done), end = arrayEnd(done); s != end; ++s) {
+  for (s = array_begin(done), end = array_end(done); s != end; ++s) {
     if (*s == str) {
       return;
     }
   }
-  array_pushVal(done, &str);
+  array_push_val(done, &str);
 
   /* check if we need to compile the members types first */
   for (i = 0; i < str->num_members; ++i) {
@@ -2686,15 +2686,15 @@ int main(int argc, char const *argv[]) {
           case FUNCTION_DECLARATION_STMT: {
             FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
             fun->body.parent_scope = global_scope;
-            array_pushVal(&statements, &stmt);
+            array_push_val(&statements, &stmt);
             jai_log(DEBUG_INFO, "Adding function definition %s\n", ((FunctionDeclarationAST*) stmt)->name);
           } break;
           case VARIABLE_DECLARATION_STMT: {
-            array_pushVal(&statements, &stmt);
+            array_push_val(&statements, &stmt);
             jai_log(DEBUG_INFO, "Adding variable declaration %s with declared type %s\n", ((VariableDeclarationAST*) stmt)->name, print_type_ast_name(((VariableDeclarationAST*) stmt)->type_ast));
           } break;
           case STRUCT_DECLARATION_STMT: {
-            array_pushVal(&statements, &stmt);
+            array_push_val(&statements, &stmt);
             jai_log(DEBUG_INFO, "Adding type $t\n", &((StructDeclarationAST*) stmt)->str);
           } break;
           default:
@@ -2709,8 +2709,8 @@ int main(int argc, char const *argv[]) {
     }
 
     global_scope->statements = arena_push_array(&statements, &perm_arena);
-    global_scope->num_statements = arrayCount(&statements);
-    arrayFree(&statements);
+    global_scope->num_statements = array_count(&statements);
+    array_free(&statements);
 
     if (found_error) {
       jai_log(ERROR, "Exiting due to previous errors\n");
@@ -2730,8 +2730,8 @@ int main(int argc, char const *argv[]) {
 
     {
       DynArray mains = getFunctionDeclarations("main", global_scope);
-      if (arrayCount(&mains) == 1) {
-        FunctionDeclarationAST* jai_main = *(FunctionDeclarationAST**) arrayGet(&mains, 0);
+      if (array_count(&mains) == 1) {
+        FunctionDeclarationAST* jai_main = *(FunctionDeclarationAST**) array_get(&mains, 0);
         if (jai_main->num_args == 0) {
           /* TODO: check signature of main */
           FILE* header = tmpfile();
@@ -2781,7 +2781,7 @@ int main(int argc, char const *argv[]) {
                 }
               }
 
-              arrayFree(&compiled_structs);
+              array_free(&compiled_structs);
               fprintf(header, "\n");
             }
 
@@ -2831,7 +2831,7 @@ int main(int argc, char const *argv[]) {
 
             /* TODO: check signature of main */
             print(tail, "int main(int argc, const char* argv[]) {\n\t$f();\n};\n", jai_main);
-            arrayFree(&mains);
+            array_free(&mains);
 
             {
               char buf[256];
@@ -2874,7 +2874,7 @@ int main(int argc, char const *argv[]) {
             }
           } else {jai_log(ERROR, "Failed to open temp files\n"); }
         } else {jai_log_at(ERROR, jai_main->body.stmt.pos, "main must not take any arguments");}
-      } else if (arrayCount(&mains) > 1) {jai_log(ERROR, "Only one main can be defined"); }
+      } else if (array_count(&mains) > 1) {jai_log(ERROR, "Only one main can be defined"); }
       else {jai_log(ERROR, "No main function declared\n"); }
     }
   }

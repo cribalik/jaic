@@ -60,11 +60,11 @@ internal void* arena_pop(MemArena* arena, int size) {
   }
 }
 
-internal void arena_pop_to(MemArena* arena, void* _to) {
-  char* to = (char*) _to;
+internal void arena_pop_to(MemArena* arena, void* to) {
+  char* dest = (char*) to;
   while (1) {
-    if ((*arena)->data <= to && (*arena)->data + (*arena)->size >= to) {
-      (*arena)->size = to-(*arena)->data;
+    if ((*arena)->data <= dest && (*arena)->data + (*arena)->size >= dest) {
+      (*arena)->size = dest-(*arena)->data;
       return;
     }
     else {
