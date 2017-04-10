@@ -68,8 +68,8 @@ void printLine(FILE* out, char* filename, int line, int column) {
 global bool found_error = false;
 
 /* Example: 
- * jai_log_at(ERROR, "value was %i", 3);
- * jai_log_at(DEBUG_INFO, "value was %i, that makes me %s", 5, happy ? "happy" : "sad");
+ * zen_log_at(ERROR, "value was %i", 3);
+ * zen_log_at(DEBUG_INFO, "value was %i, that makes me %s", 5, happy ? "happy" : "sad");
  */
 #ifndef DEBUG
   #define DEBUG 0
@@ -84,7 +84,7 @@ typedef enum {
   _LOG_DEBUG_INFO,
   _LOG_DEBUG_ERROR
 } _LogType;
-internal void jai_log_at(_LogType type, char* file, int line, FilePos filepos, char* fmt, ...) {
+internal void zen_log_at(_LogType type, char* file, int line, FilePos filepos, char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   switch (type) {
@@ -116,7 +116,7 @@ internal void jai_log_at(_LogType type, char* file, int line, FilePos filepos, c
   }
   va_end(args);
 }
-internal void jai_log(_LogType type, char* file, int line, char* fmt, ...) {
+internal void zen_log(_LogType type, char* file, int line, char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   switch (type) {
@@ -176,10 +176,10 @@ global MemArena perm_arena;
   FilePos _position = prev_pos; \
   fgetpos(file, &_position.fpos); \
   int _num_chars_last_read = num_chars_last_read; \
-  jai_log(DEBUG_INFO, "Pushing %s:%i:%i %c\n", _position.file, _position.line, _position.column-1, curr_char);
+  zen_log(DEBUG_INFO, "Pushing %s:%i:%i %c\n", _position.file, _position.line, _position.column-1, curr_char);
 
 #define popPosition \
-  jai_log(DEBUG_INFO, "Jumping back to %s:%i:%i %c\n", prev_pos.file, prev_pos.line, prev_pos.column-1, curr_char); \
+  zen_log(DEBUG_INFO, "Jumping back to %s:%i:%i %c\n", prev_pos.file, prev_pos.line, prev_pos.column-1, curr_char); \
   fsetpos(file, &_position.fpos); \
   fseek(file, -_num_chars_last_read - 1, SEEK_CUR); \
   next_pos = _position; \
@@ -199,7 +199,7 @@ global FilePos next_pos;
 global int num_chars_read = 0;
 internal char getChar(FILE* file) {
   char c = getc(file);
-  /* jai_log(DEBUG_INFO, "%i: %c\n", num_chars_read, c); */
+  /* zen_log(DEBUG_INFO, "%i: %c\n", num_chars_read, c); */
   ++num_chars_read;
   ++next_pos.column;
   if (c == '\n') {
@@ -309,7 +309,7 @@ internal int gettok() {
     }
 
     if (i == BUFFER_SIZE) {
-      jai_log_at(ERROR, prev_pos, "Reached max size for int\n");
+      zen_log_at(ERROR, prev_pos, "Reached max size for int\n");
     }
     else if (curr_char == '.') {
       buf[i++] = '.';
@@ -321,7 +321,7 @@ internal int gettok() {
         }
 
         if (i == BUFFER_SIZE) {
-          jai_log_at(ERROR, prev_pos, "Reached max size for float number\n");
+          zen_log_at(ERROR, prev_pos, "Reached max size for float number\n");
         }
         /* TODO: check for suffixes here e.g. 30.0f */
         else {
@@ -330,7 +330,7 @@ internal int gettok() {
           return TOK_FLOAT;
         }
       } else {
-        jai_log_at(ERROR, prev_pos, "Unexpected character '%c', expected floating point number or '..'\n", curr_char);
+        zen_log_at(ERROR, prev_pos, "Unexpected character '%c', expected floating point number or '..'\n", curr_char);
       }
     }
     /* TODO: check for suffixes here e.g. 10u32 */
@@ -403,12 +403,12 @@ internal char* print_token() {
 
 global int num_chars_last_read = 0;
 internal void eatToken() {
-  /* jai_log(DEBUG_INFO, "before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column); */
+  /* zen_log(DEBUG_INFO, "before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column); */
   int i = num_chars_read;
   token = gettok();
   eatWhitespace();
   num_chars_last_read = num_chars_read - i;
-  /* jai_log(DEBUG_INFO, "last read: %i token: %s\n", num_chars_last_read, print_token()); */
+  /* zen_log(DEBUG_INFO, "last read: %i token: %s\n", num_chars_last_read, print_token()); */
 }
 
 internal void goto_matching_brace() {
@@ -419,7 +419,7 @@ internal void goto_matching_brace() {
     if (token == '{') ++d;
     else if (token == '}') --d;
     else if (token == EOF) {
-      jai_log_at(ERROR, pos, "No matching brace found\n");
+      zen_log_at(ERROR, pos, "No matching brace found\n");
       return;
     }
   }
@@ -776,7 +776,7 @@ internal int parse_block(CompoundStatementAST* result, DynArray* prefix) {
     if (stmt) {
       array_push_val(array, &stmt);
     } else {
-      jai_log_at(ERROR, prev_pos, "Failed to parse statement\n");
+      zen_log_at(ERROR, prev_pos, "Failed to parse statement\n");
       array_free(array);
       return 1;
     }
@@ -798,7 +798,7 @@ internal ExpressionAST* parsePrimitive() {
       f->value.float_val = floatVal;
       f->expr.type = &builtin_types[FLOAT_TYPE];
       eatToken();
-      jai_log(DEBUG_INFO, "Found a float literal with value %f\n", f->value.f32);
+      zen_log(DEBUG_INFO, "Found a float literal with value %f\n", f->value.f32);
       return &f->expr;
     } break;
 
@@ -809,7 +809,7 @@ internal ExpressionAST* parsePrimitive() {
       i->value.int_val = intVal;
       i->expr.type = &builtin_types[INT_TYPE];
       eatToken();
-      jai_log(DEBUG_INFO, "Found an int literal with value %i\n", i->value.int_val);
+      zen_log(DEBUG_INFO, "Found an int literal with value %i\n", i->value.int_val);
       return &i->expr;
     } break;
 
@@ -847,7 +847,7 @@ internal ExpressionAST* parsePrimitive() {
 
             expr = parseExpression();
             if (!expr) {
-              jai_log_at(ERROR, prev_pos, "Invalid expression inside function call\n");
+              zen_log_at(ERROR, prev_pos, "Invalid expression inside function call\n");
               array_free(&args);
               return 0;
             }
@@ -861,7 +861,7 @@ internal ExpressionAST* parsePrimitive() {
             if (token == ',') {
               eatToken();
             } else {
-              jai_log_at(ERROR, prev_pos, "Expected ',' between function input parameters\n");
+              zen_log_at(ERROR, prev_pos, "Expected ',' between function input parameters\n");
             }
           }
 
@@ -871,7 +871,7 @@ internal ExpressionAST* parsePrimitive() {
           }
           array_free(&args);
 
-          jai_log(DEBUG_INFO, "Found function call with %i inputs\n", call->num_args);
+          zen_log(DEBUG_INFO, "Found function call with %i inputs\n", call->num_args);
           result = &call->expr;
         }
         /* array element? */
@@ -889,11 +889,11 @@ internal ExpressionAST* parsePrimitive() {
               eatToken();
               result = &as->expr;
             } else {
-              jai_log_at(ERROR, prev_pos, "Found no matching ']'\n");
+              zen_log_at(ERROR, prev_pos, "Found no matching ']'\n");
               return 0;
             }
           } else {
-            jai_log_at(ERROR, prev_pos, "Failed to parse array subscript index\n");
+            zen_log_at(ERROR, prev_pos, "Failed to parse array subscript index\n");
             return 0;
           }
         }
@@ -909,7 +909,7 @@ internal ExpressionAST* parsePrimitive() {
             result = &ast->expr;
             eatToken();
           } else {
-            jai_log_at(ERROR, prev_pos, "Identifier expected after '.', instead got %s\n", print_token());
+            zen_log_at(ERROR, prev_pos, "Identifier expected after '.', instead got %s\n", print_token());
             return 0;
           }
         }
@@ -957,11 +957,11 @@ internal ExpressionAST* parsePrimitive() {
                   eatToken();
                   break;
                 } else {
-                  jai_log_at(ERROR, prev_pos, "Expected ',' or '}', but found %s\n", print_token());
+                  zen_log_at(ERROR, prev_pos, "Expected ',' or '}', but found %s\n", print_token());
                 }
-              } else {jai_log_at(ERROR, prev_pos, "Failed to parse expression\n");}
-            } else {jai_log_at(ERROR, prev_pos, "Expected '=' after member name, found %s\n", print_token());}
-          } else {jai_log_at(ERROR, prev_pos, "Expected identifier, instead found %s\n", print_token());}
+              } else {zen_log_at(ERROR, prev_pos, "Failed to parse expression\n");}
+            } else {zen_log_at(ERROR, prev_pos, "Expected '=' after member name, found %s\n", print_token());}
+          } else {zen_log_at(ERROR, prev_pos, "Expected identifier, instead found %s\n", print_token());}
 
           if (!success) {
             while (token != '}') {
@@ -989,7 +989,7 @@ internal ExpressionAST* parsePrimitive() {
     } break;
 
     default: {
-      jai_log_at(ERROR, prev_pos, "Failed to parse expression\n");
+      zen_log_at(ERROR, prev_pos, "Failed to parse expression\n");
       return 0;
     } break;
   }
@@ -1017,7 +1017,7 @@ internal ExpressionAST* parseExpression() {
       bin->expr.stmt.pos = prev_pos;
       bin->operator = token;
       bin->lhs = expr;
-      jai_log_at(DEBUG_INFO, prev_pos, "Found binary expression with operator %s\n", print_token());
+      zen_log_at(DEBUG_INFO, prev_pos, "Found binary expression with operator %s\n", print_token());
       eatToken();
       bin->rhs = parseExpression();
       return &bin->expr;
@@ -1050,8 +1050,8 @@ internal bool parseType(TypeAST* result) {
             type->static_array.size = expr;
             eatToken();
             continue;
-          } else {jai_log_at(ERROR, prev_pos, "Expected matching ']' in array type\n");}
-        } else {jai_log_at(ERROR, prev_pos, "Expected ']' or constant after '[' (array type)\n");}
+          } else {zen_log_at(ERROR, prev_pos, "Expected matching ']' in array type\n");}
+        } else {zen_log_at(ERROR, prev_pos, "Expected ']' or constant after '[' (array type)\n");}
       }
     }
     else if (token == '^') {
@@ -1074,7 +1074,7 @@ internal bool parseType(TypeAST* result) {
     eatToken();
   } else {
     if (partial_success) {
-      jai_log_at(ERROR, prev_pos, "Expected type name\n");
+      zen_log_at(ERROR, prev_pos, "Expected type name\n");
     }
     return false;
   }
@@ -1113,7 +1113,7 @@ internal StatementAST* _parseStatement() {
           loop->index.stmt.pos = prev_pos;
           eatToken();
         } else {
-          jai_log_at(ERROR, prev_pos, "Expected index name\n");
+          zen_log_at(ERROR, prev_pos, "Expected index name\n");
           return 0;
         }
       }
@@ -1131,7 +1131,7 @@ internal StatementAST* _parseStatement() {
             eatToken();
             loop->to = parseExpression();
             if (!loop->to) {
-              jai_log_at(ERROR, prev_pos, "Could not parse expression at end of loop\n");
+              zen_log_at(ERROR, prev_pos, "Could not parse expression at end of loop\n");
               return 0;
             }
           }
@@ -1150,7 +1150,7 @@ internal StatementAST* _parseStatement() {
               if (stmt) {
                 array_push_val(&statements, &stmt);
               } else {
-                jai_log_at(ERROR, prev_pos, "Failed to parse statement in loop body\n");
+                zen_log_at(ERROR, prev_pos, "Failed to parse statement in loop body\n");
                 break;
               }
             }
@@ -1159,12 +1159,12 @@ internal StatementAST* _parseStatement() {
             array_free(&statements);
             return &loop->body.stmt;
           } else {
-            jai_log_at(ERROR, prev_pos, "Expected block after loop. Did you forget '{'?\n");
+            zen_log_at(ERROR, prev_pos, "Expected block after loop. Did you forget '{'?\n");
           }
           return 0;
-        } else {jai_log_at(ERROR, prev_pos, "Expected expression\n");}
-      } else {jai_log_at(ERROR, prev_pos, "Expected ':'\n");}
-    } else {jai_log_at(ERROR, prev_pos, "Expected a name for element in list.. For example 'for x : list {...}'\n");}
+        } else {zen_log_at(ERROR, prev_pos, "Expected expression\n");}
+      } else {zen_log_at(ERROR, prev_pos, "Expected ':'\n");}
+    } else {zen_log_at(ERROR, prev_pos, "Expected a name for element in list.. For example 'for x : list {...}'\n");}
     return 0;
   }
 
@@ -1177,7 +1177,7 @@ internal StatementAST* _parseStatement() {
     ast->value = parseExpression();
     if (ast->value) {
       return &ast->stmt;
-    } else {jai_log_at(ERROR, ast->stmt.pos, "Failed to parse return statement\n");}
+    } else {zen_log_at(ERROR, ast->stmt.pos, "Failed to parse return statement\n");}
   }
 
   else if (token == TOK_FN) {
@@ -1209,13 +1209,13 @@ internal StatementAST* _parseStatement() {
           if (token == TOK_IDENTIFIER) {
             arg->name = arena_push_string(&perm_arena, identifierStr);
             eatToken();
-            jai_log(DEBUG_INFO, "Found parameter %s\n", arg->name);
+            zen_log(DEBUG_INFO, "Found parameter %s\n", arg->name);
 
             if (token == ':') {
               eatToken();
 
               if (parseType(&arg->type_ast)) {
-                jai_log(DEBUG_INFO, " - with type %s\n", print_type_ast_name(arg->type_ast));
+                zen_log(DEBUG_INFO, " - with type %s\n", print_type_ast_name(arg->type_ast));
                 /* TODO: default parameters */
 
                 if (token == ',') {
@@ -1225,10 +1225,10 @@ internal StatementAST* _parseStatement() {
                 else if (token == ')') {
                   eatToken();
                   break;
-                } else {jai_log_at(ERROR, prev_pos, "Expected ',' or ')' after parameter\n");}
-              } else {jai_log_at(ERROR, prev_pos, "Type expected after ':'\n");}
-            } else {jai_log_at(ERROR, prev_pos, "No type found after parameter name (did you forget a ':'?\n");}
-          } else {jai_log_at(ERROR, prev_pos, "Identifier expected in parameter list, found %s\n", print_token());}
+                } else {zen_log_at(ERROR, prev_pos, "Expected ',' or ')' after parameter\n");}
+              } else {zen_log_at(ERROR, prev_pos, "Type expected after ':'\n");}
+            } else {zen_log_at(ERROR, prev_pos, "No type found after parameter name (did you forget a ':'?\n");}
+          } else {zen_log_at(ERROR, prev_pos, "Identifier expected in parameter list, found %s\n", print_token());}
           array_free(&args);
           return 0;
         }
@@ -1240,7 +1240,7 @@ internal StatementAST* _parseStatement() {
         if (token == ':') {
           eatToken();
           if (!parseType(&fun->return_type_ast)) {
-            jai_log_at(ERROR, prev_pos, "Expected type after ':'");
+            zen_log_at(ERROR, prev_pos, "Expected type after ':'");
           };
         } else {
           fun->return_type_ast = void_type_ast;
@@ -1256,7 +1256,7 @@ internal StatementAST* _parseStatement() {
               eatToken();
               fun->is_foreign = true;
             } else {
-              jai_log_at(ERROR, prev_pos, "Invalid compiler directive, did you mean to use 'foreign' ?\n");
+              zen_log_at(ERROR, prev_pos, "Invalid compiler directive, did you mean to use 'foreign' ?\n");
               return 0;
             }
           }
@@ -1273,7 +1273,7 @@ internal StatementAST* _parseStatement() {
                 if (stmt) {
                   array_push_val(&statements, &stmt);
                   continue;
-                } else {jai_log_at(ERROR, prev_pos, "Failed to parse statement in %s\n", fun->name);}
+                } else {zen_log_at(ERROR, prev_pos, "Failed to parse statement in %s\n", fun->name);}
               }
               goto_matching_brace();
               array_free(&statements);
@@ -1283,13 +1283,13 @@ internal StatementAST* _parseStatement() {
             fun->body.statements = arena_push_array(&statements, &perm_arena);
             array_free(&statements);
 
-          } else {jai_log_at(ERROR, prev_pos, "No '{' or '#foreign' found after function parameter list\n");}
+          } else {zen_log_at(ERROR, prev_pos, "No '{' or '#foreign' found after function parameter list\n");}
 
-          jai_log(DEBUG_INFO, "Found a function definition with name %s, and %i arguments\n", fun->name, fun->num_args);
+          zen_log(DEBUG_INFO, "Found a function definition with name %s, and %i arguments\n", fun->name, fun->num_args);
           return &fun->body.stmt;
-        } else {jai_log_at(ERROR, prev_pos, "Failed to parse return type\n");}
-      } else {jai_log_at(ERROR, prev_pos, "token %s not start of a function prototype\n", print_token(token));}
-    } else {jai_log_at(ERROR, prev_pos, "Expected function name, found %s\n", print_token());}
+        } else {zen_log_at(ERROR, prev_pos, "Failed to parse return type\n");}
+      } else {zen_log_at(ERROR, prev_pos, "token %s not start of a function prototype\n", print_token(token));}
+    } else {zen_log_at(ERROR, prev_pos, "Expected function name, found %s\n", print_token());}
     return 0;
   }
 
@@ -1326,9 +1326,9 @@ internal StatementAST* _parseStatement() {
                 } else {
                   continue;
                 }
-              } else { jai_log_at(ERROR, prev_pos, "No type after member\n"); }
-            } else { jai_log_at(ERROR, prev_pos, "No type after member. Did you forget a ':'?\n"); }
-          } else { jai_log_at(ERROR, prev_pos, "Expected member name, instead found %s\n", print_token()); }
+              } else { zen_log_at(ERROR, prev_pos, "No type after member\n"); }
+            } else { zen_log_at(ERROR, prev_pos, "No type after member. Did you forget a ':'?\n"); }
+          } else { zen_log_at(ERROR, prev_pos, "Expected member name, instead found %s\n", print_token()); }
           while (token != '}') {
             eatToken();
           }
@@ -1341,8 +1341,8 @@ internal StatementAST* _parseStatement() {
         decl->str.members = arena_push_array(&members, &perm_arena);
         array_free(&members);
         return &decl->stmt;
-      } else {jai_log_at(ERROR, pos_of_identifier, "Expected '{' after struct keyword\n");}
-    } else {jai_log_at(ERROR, prev_pos, "Expected struct name, got %s", print_token());}
+      } else {zen_log_at(ERROR, pos_of_identifier, "Expected '{' after struct keyword\n");}
+    } else {zen_log_at(ERROR, prev_pos, "Expected struct name, got %s", print_token());}
     return 0;
   }
 
@@ -1362,7 +1362,7 @@ internal StatementAST* _parseStatement() {
       if (token == ':') {
         eatToken();
         if (!parseType(&var->type_ast)) {
-          jai_log_at(ERROR, prev_pos, "Expected type after ':'\n");
+          zen_log_at(ERROR, prev_pos, "Expected type after ':'\n");
           return 0;
         }
       }
@@ -1375,13 +1375,13 @@ internal StatementAST* _parseStatement() {
 
       /* if no assignment, was there at least a type declaration? */
       if (!var->value && !var->type_ast.name) {
-        jai_log_at(ERROR, prev_pos, "Can't infer type of variable. Need type declaration or initial value");
+        zen_log_at(ERROR, prev_pos, "Can't infer type of variable. Need type declaration or initial value");
         return 0;
       }
 
       return &var->stmt;
 
-    } else {jai_log_at(ERROR, prev_pos, "Expected variable name, got token %s", print_token());}
+    } else {zen_log_at(ERROR, prev_pos, "Expected variable name, got token %s", print_token());}
   }
 
   else {
@@ -1400,7 +1400,7 @@ internal StatementAST* _parseStatement() {
           return &ass->stmt;
         }
         else {
-          jai_log_at(ERROR, prev_pos, "Failed to parse right hand side of assignment, expected expression\n");
+          zen_log_at(ERROR, prev_pos, "Failed to parse right hand side of assignment, expected expression\n");
           return 0;
         }
       }
@@ -1412,7 +1412,7 @@ internal StatementAST* _parseStatement() {
       }
 
       return 0;
-    } else {jai_log_at(ERROR, pos_of_identifier, "Failed to parse statement\n"); }
+    } else {zen_log_at(ERROR, pos_of_identifier, "Failed to parse statement\n"); }
   }
   return 0;
 }
@@ -1503,7 +1503,7 @@ internal Constant* getConstantFromExpression(ExpressionAST* val) {
     } break;
 
     default: {
-      jai_log_at(ERROR, val->stmt.pos, "Value of expression could not be determined at compile time\n");
+      zen_log_at(ERROR, val->stmt.pos, "Value of expression could not be determined at compile time\n");
     } break;
   }
   return 0;
@@ -1577,9 +1577,9 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
 
               return (Type*) result;
 
-            } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Array size must be integer, but got '$t'");}
-          } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Array size must be a compile time constant\n");}
-        } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
+            } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Array size must be integer, but got '$t'");}
+          } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Array size must be a compile time constant\n");}
+        } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
       } break;
 
       case ARRAY_TYPE_AST: {
@@ -1609,7 +1609,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
 
           return &result->type;
 
-        } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
+        } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
       } break;
 
       case POINTER_TYPE_AST: {
@@ -1637,7 +1637,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
           }
 
           return &result->type;
-        } else {jai_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
+        } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
 
         /* create new type if needed */
       } break;
@@ -1716,14 +1716,14 @@ internal void _evaluateTypeOfStruct(StructType* str, DynArray* parents, Compound
     if (!str->members[i].type) {
       str->members[i].type = getTypeDeclaration(str->members[i].type_ast, scope, false);
       if (!str->members[i].type) {
-        jai_log_at(ERROR, str->members[i].pos, "Could not find type %s\n", print_type_ast_name(str->members[i].type_ast));
+        zen_log_at(ERROR, str->members[i].pos, "Could not find type %s\n", print_type_ast_name(str->members[i].type_ast));
         return;
       }
       if (str->members[i].type->type == STRUCT_TYPE && str->members[i].type_ast.num_partial_types == 0) {
         char **parent, **end;
         for (parent = array_begin(parents), end = array_end(parents); parent != end; ++parent) {
           if (strcmp(*parent, str->members[i].type_ast.name) == 0) {
-            jai_log_at(ERROR, str->members[i].pos, "Type %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
+            zen_log_at(ERROR, str->members[i].pos, "Type %s cannot contain itself. Did you mean to use a pointer?\n", *parent);
             exit(1);
           }
         }
@@ -1755,7 +1755,7 @@ internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Com
   if (var->type_ast.name) {
     declared_type = getTypeDeclaration(var->type_ast, scope, true);
     if (!declared_type) {
-      jai_log_at(ERROR, var->stmt.pos, "Declared type '%s' for '%s' doesn't exist\n", print_type_ast_name(var->type_ast), var->name);
+      zen_log_at(ERROR, var->stmt.pos, "Declared type '%s' for '%s' doesn't exist\n", print_type_ast_name(var->type_ast), var->name);
       var->type = 0;
       return;
     }
@@ -1765,7 +1765,7 @@ internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Com
   if (var->value) {
     evaluateTypeOfExpression(var->value, var->type, scope);
     if (!var->value->type) {
-      jai_log_at(ERROR, var->stmt.pos, "Couldn't infer type for %s\n", var->name);
+      zen_log_at(ERROR, var->stmt.pos, "Couldn't infer type for %s\n", var->name);
       var->type = 0;
       return;
     }
@@ -1777,7 +1777,7 @@ internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Com
 
   /* check that infered expression type and stated type match */
   if (var->value && declared_type && var->value->type != declared_type && !hasImplicitConversion(var->value->type, declared_type)) {
-    jai_log_at(ERROR, var->value->stmt.pos, "Inferred type of '%s': '$t' differs from declared type '$t'\n", var->name, var->value->type, declared_type);
+    zen_log_at(ERROR, var->value->stmt.pos, "Inferred type of '%s': '$t' differs from declared type '$t'\n", var->name, var->value->type, declared_type);
     var->type = 0;
     return;
   }
@@ -1795,13 +1795,13 @@ internal void evaluateTypeOfFunction(FunctionDeclarationAST* fun, CompoundStatem
   for (i = 0; i < fun->num_args; ++i) {
     fun->args[i].type = getTypeDeclaration(fun->args[i].type_ast, scope, true);
     if (!fun->args[i].type) {
-      jai_log_at(ERROR, fun->args[i].stmt.pos, "Could not find type '%s'\n", print_type_ast_name(fun->args[i].type_ast));
+      zen_log_at(ERROR, fun->args[i].stmt.pos, "Could not find type '%s'\n", print_type_ast_name(fun->args[i].type_ast));
     }
   }
 
   fun->return_type = getTypeDeclaration(fun->return_type_ast, scope, true);
   if (!fun->return_type) {
-    jai_log_at(ERROR, fun->pos, "Could not find definition of return type '%s' of '%s'\n", print_type_ast_name(fun->return_type_ast), fun->name);
+    zen_log_at(ERROR, fun->pos, "Could not find definition of return type '%s' of '%s'\n", print_type_ast_name(fun->return_type_ast), fun->name);
   }
 }
 
@@ -1827,7 +1827,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
         if (as->base->type->type == ARRAY_TYPE || as->base->type->type == STATIC_ARRAY_TYPE) {
           base_type = ((ArrayType*) as->base->type)->base_type;
         } else {
-          jai_log_at(ERROR, as->base->stmt.pos, "Type must be of array type, but found type $t", as->base->type);
+          zen_log_at(ERROR, as->base->stmt.pos, "Type must be of array type, but found type $t", as->base->type);
         }
 
         if (base_type) {
@@ -1836,7 +1836,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
             /* TODO: size_t instead */
             if (as->subscript->type->type == INT_TYPE) {
               as->expr.type = base_type;
-            } else {jai_log_at(ERROR, as->subscript->stmt.pos, "Array subscript must be integer, found $t\n", as->subscript->type);}
+            } else {zen_log_at(ERROR, as->subscript->stmt.pos, "Array subscript must be integer, found $t\n", as->subscript->type);}
           }
         }
       }
@@ -1879,24 +1879,24 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
           }
           if (matches > 1) {
             /* TODO: print out actual matches, and not all overload */
-            jai_log_at(ERROR, expr->stmt.pos, "Multiple matching overloads for %s.\n", base->name);
-            jai_log(NOTE, "Overloads are:\n");
+            zen_log_at(ERROR, expr->stmt.pos, "Multiple matching overloads for %s.\n", base->name);
+            zen_log(NOTE, "Overloads are:\n");
             for (it = array_begin(&funs), end = array_end(&funs); it < end; ++it) {
-              jai_log_at(NOTE, (*it)->pos, "\n");
+              zen_log_at(NOTE, (*it)->pos, "\n");
             }
           } else if (matches == 0) {
-            jai_log_at(ERROR, expr->stmt.pos, "Could not find matching function overload for %s.\n", base->name);
-            jai_log(NOTE, "Alternatives are:\n");
+            zen_log_at(ERROR, expr->stmt.pos, "Could not find matching function overload for %s.\n", base->name);
+            zen_log(NOTE, "Alternatives are:\n");
             for (it = array_begin(&funs), end = array_end(&funs); it < end; ++it) {
-              jai_log_at(NOTE, (*it)->pos, "\n");
+              zen_log_at(NOTE, (*it)->pos, "\n");
             }
           }
 
-        } else {jai_log_at(ERROR, call->expr.stmt.pos, "Unknown function '%s'\n", base->name); }
+        } else {zen_log_at(ERROR, call->expr.stmt.pos, "Unknown function '%s'\n", base->name); }
 
         array_free(&funs);
 
-      } else {jai_log_at(ERROR, call->expr.stmt.pos, "Functions pointers not yet supported\n");}
+      } else {zen_log_at(ERROR, call->expr.stmt.pos, "Functions pointers not yet supported\n");}
     } break;
 
     case VARIABLE_GET_EXPR: {
@@ -1904,7 +1904,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
       VariableDeclarationAST* var = getVariableDeclaration(var_ref->name, scope);
       if (var) {
         expr->type = var->type;
-      } else {jai_log_at(ERROR, var_ref->expr.stmt.pos, "Use of undeclared variable '%s'\n", var_ref->name);}
+      } else {zen_log_at(ERROR, var_ref->expr.stmt.pos, "Use of undeclared variable '%s'\n", var_ref->name);}
     } break;
 
     case MEMBER_ACCESS_EXPR: {
@@ -1927,7 +1927,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
           if (match) {
             assert(match->type);
             access->expr.type = match->type;
-          } else {jai_log_at(ERROR, access->expr.stmt.pos, "struct %s has no member %s\n", str->name, access->name);}
+          } else {zen_log_at(ERROR, access->expr.stmt.pos, "struct %s has no member %s\n", str->name, access->name);}
         } else if (access->base->type->type == ARRAY_TYPE) {
 
           if (!strcmp(access->name, "count") || !strcmp(access->name, "size") || !strcmp(access->name, "length")) {
@@ -1935,11 +1935,11 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
             access->expr.type = &builtin_types[INT_TYPE];
           }
           else if (!strcmp(access->name, "data")) {
-            jai_log_at(ERROR, access->expr.stmt.pos, "Pointers not yet implemented\n");
+            zen_log_at(ERROR, access->expr.stmt.pos, "Pointers not yet implemented\n");
             UNIMPLEMENTED;
           }
 
-        } else {jai_log_at(ERROR, access->base->stmt.pos, "Can only access members of structs or arrays, '$t' is neither\n", access->base->type);}
+        } else {zen_log_at(ERROR, access->base->stmt.pos, "Can only access members of structs or arrays, '$t' is neither\n", access->base->type);}
       }
     } break;
 
@@ -1961,14 +1961,14 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
               }
             }
             if (!name_match) {
-              jai_log_at(ERROR, expr->stmt.pos, "%s has no member %s\n", target->name, ast->members[i].name);
+              zen_log_at(ERROR, expr->stmt.pos, "%s has no member %s\n", target->name, ast->members[i].name);
               all_match = false;
               break;
             }
             assert(ast->members[i].member->type);
             evaluateTypeOfExpression(ast->members[i].value, ast->members[i].member->type, scope);
             if (ast->members[i].value->type != ast->members[i].member->type) {
-              jai_log_at(ERROR, expr->stmt.pos, "The member '%s' in '%s' has type '$t', but the expression has type '$t'\n", ast->members[i].member->name, target->name, ast->members[i].member->type, ast->members[i].value->type);
+              zen_log_at(ERROR, expr->stmt.pos, "The member '%s' in '%s' has type '$t', but the expression has type '$t'\n", ast->members[i].member->name, target->name, ast->members[i].member->type, ast->members[i].value->type);
               all_match = false;
               break;
             }
@@ -1976,8 +1976,8 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
           if (all_match) {
             expr->type = evidence;
           }
-        } else {jai_log_at(ERROR, expr->stmt.pos, "Cannot use struct initialization for non-struct type $t\n", evidence);}
-      } else {jai_log_at(ERROR, expr->stmt.pos, "Not enough type information top evaluate type of struct initialization\n");}
+        } else {zen_log_at(ERROR, expr->stmt.pos, "Cannot use struct initialization for non-struct type $t\n", evidence);}
+      } else {zen_log_at(ERROR, expr->stmt.pos, "Not enough type information top evaluate type of struct initialization\n");}
     } break;
 
     case BINOP_EXPR: {
@@ -1988,7 +1988,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
       if (ast->lhs->type == ast->rhs->type) {
         ast->expr.type = ast->lhs->type;
       } else {
-        jai_log_at(ERROR, ast->lhs->stmt.pos, "Type of left hand side '$t' does not match type of right hand side '$t'\n", ast->lhs->type, ast->rhs->type);
+        zen_log_at(ERROR, ast->lhs->stmt.pos, "Type of left hand side '$t' does not match type of right hand side '$t'\n", ast->lhs->type, ast->rhs->type);
       }
     } break;
   }
@@ -2001,12 +2001,12 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
 
     if (evidence == &array_no_internal_type) {
       if (expr->type->type != ARRAY_TYPE && expr->type->type != STATIC_ARRAY_TYPE) {
-        jai_log_at(ERROR, expr->stmt.pos, "Context demands array, but expression was of type $t\n", expr->type);
+        zen_log_at(ERROR, expr->stmt.pos, "Context demands array, but expression was of type $t\n", expr->type);
         expr->type = 0;
       }
     }
     else if (evidence != expr->type) {
-      jai_log_at(ERROR, expr->stmt.pos, "Expected type $t, but expression was type $t\n", evidence, expr->type);
+      zen_log_at(ERROR, expr->stmt.pos, "Expected type $t, but expression was type $t\n", evidence, expr->type);
       expr->type = 0;
     }
   }
@@ -2023,16 +2023,16 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
       case STRUCT_DECLARATION_STMT: {
         StructDeclarationAST* decl = (StructDeclarationAST*) stmt;
         evaluateTypeOfStruct(&decl->str, scope);
-        jai_log(DEBUG_INFO, "Evaluated type of struct '%s'\n", decl->str.name);
+        zen_log(DEBUG_INFO, "Evaluated type of struct '%s'\n", decl->str.name);
       } break;
 
       case VARIABLE_DECLARATION_STMT: {
         VariableDeclarationAST* var = (VariableDeclarationAST*) stmt;
         evaluateTypeOfVariableDeclaration(var, scope);
         if (var->type) {
-          jai_log_at(DEBUG_INFO, var->stmt.pos, "Evaluated type of '%s' to '$t'\n", var->name, var->type);
+          zen_log_at(DEBUG_INFO, var->stmt.pos, "Evaluated type of '%s' to '$t'\n", var->name, var->type);
         } else {
-          jai_log_at(ERROR, var->stmt.pos, "Failed to evaluate type of '%s'\n", var->name);
+          zen_log_at(ERROR, var->stmt.pos, "Failed to evaluate type of '%s'\n", var->name);
         }
       } break;
 
@@ -2043,16 +2043,16 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
         if (fun->body.num_statements) {
           doTypeInferenceForScope(&fun->body);
         }
-        jai_log_at(DEBUG_INFO, fun->pos, "Evaluated body of '%s'\n", fun->name);
+        zen_log_at(DEBUG_INFO, fun->pos, "Evaluated body of '%s'\n", fun->name);
       } break;
 
       case EXPRESSION_STMT: {
         ExpressionAST* expr = (ExpressionAST*) stmt;
         evaluateTypeOfExpression(expr, 0, scope);
         if (expr->type) {
-          jai_log_at(DEBUG_INFO, expr->stmt.pos, "Evaluated type of expression to $t\n", expr->type);
+          zen_log_at(DEBUG_INFO, expr->stmt.pos, "Evaluated type of expression to $t\n", expr->type);
         } else {
-          jai_log_at(ERROR, expr->stmt.pos, "Failed to infer type of expression\n");
+          zen_log_at(ERROR, expr->stmt.pos, "Failed to infer type of expression\n");
         }
       } break;
 
@@ -2070,10 +2070,10 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
           evaluateTypeOfExpression(loop->from, &builtin_types[INT_TYPE], scope);
           evaluateTypeOfExpression(loop->to, &builtin_types[INT_TYPE], scope);
           if (!loop->from->type || !loop->to->type) {
-            jai_log_at(ERROR, loop->from->stmt.pos, "Loop indexes are not integers\n");
+            zen_log_at(ERROR, loop->from->stmt.pos, "Loop indexes are not integers\n");
           }
           if (loop->from->type != loop->to->type) {
-            jai_log_at(ERROR, loop->from->stmt.pos, "Types of start index and stop index differ\n");
+            zen_log_at(ERROR, loop->from->stmt.pos, "Types of start index and stop index differ\n");
           }
           loop->iter.type = loop->from->type;
         } else {
@@ -2083,7 +2083,7 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
             ArrayType* arr = (ArrayType*) loop->from->type;
             loop->iter.type = arr->base_type;
           }
-          else {jai_log_at(ERROR, loop->from->stmt.pos, "Loop iteratable must be of array type\n"); }
+          else {zen_log_at(ERROR, loop->from->stmt.pos, "Loop iteratable must be of array type\n"); }
         }
 
         doTypeInferenceForScope(&loop->body);
@@ -2094,13 +2094,13 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
         evaluateTypeOfExpression(ass->lhs, 0, scope);
         evaluateTypeOfExpression(ass->rhs, ass->lhs->type, scope);
         if (!ass->lhs->type) {
-          jai_log_at(ERROR, stmt->pos, "Could not infer type of left hand side of assignment\n");
+          zen_log_at(ERROR, stmt->pos, "Could not infer type of left hand side of assignment\n");
         }
         else if (!ass->rhs->type) {
-          jai_log_at(ERROR, stmt->pos, "Could not infer type of right hand side of assignment\n");
+          zen_log_at(ERROR, stmt->pos, "Could not infer type of right hand side of assignment\n");
         }
         else if (ass->lhs->type != ass->rhs->type && !hasImplicitConversion(ass->rhs->type, ass->lhs->type)) {
-          jai_log_at(ERROR, stmt->pos, "Left hand side has type $t, but right hand side has type $t\n", ass->lhs->type, ass->rhs->type);
+          zen_log_at(ERROR, stmt->pos, "Left hand side has type $t, but right hand side has type $t\n", ass->lhs->type, ass->rhs->type);
         }
       } break;
 
@@ -2119,14 +2119,14 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
           evaluateTypeOfExpression(ret->value, fun->return_type, scope);
           if (ret->value->type) {
             if (ret->value->type != fun->return_type) {
-              jai_log_at(ERROR, ret->stmt.pos, "Return type $t does not match function return type $t\n", ret->value->type, fun->return_type);
+              zen_log_at(ERROR, ret->stmt.pos, "Return type $t does not match function return type $t\n", ret->value->type, fun->return_type);
             }
-          } else {jai_log_at(ERROR, ret->stmt.pos, "Could not infer type of return value\n");};
-        } else {jai_log_at(ERROR, ret->stmt.pos, "Can only use return inside function\n");}
+          } else {zen_log_at(ERROR, ret->stmt.pos, "Could not infer type of return value\n");};
+        } else {zen_log_at(ERROR, ret->stmt.pos, "Can only use return inside function\n");}
       } break;
 
       case UNKNOWN_STMT: {
-        jai_log(DEBUG_ERROR, "Unknown statement\n");
+        zen_log(DEBUG_ERROR, "Unknown statement\n");
       } break;
 
     }
@@ -2299,7 +2299,7 @@ internal void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynAr
     }
   }
 
-  jai_log(DEBUG_INFO, "Compiling struct %s to C\n", str->name);
+  zen_log(DEBUG_INFO, "Compiling struct %s to C\n", str->name);
 
   /* Compile struct definition */
   fprintf(header, "typedef struct T_%s T_%s;\n", str->name, str->name);
@@ -2375,7 +2375,7 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
           }
         }
         fprintf(body, ")");
-      } else {jai_log_at(ERROR, call->base->stmt.pos, "Function pointers not yet implemented");}
+      } else {zen_log_at(ERROR, call->base->stmt.pos, "Function pointers not yet implemented");}
     } break;
 
     case BINOP_EXPR: {
@@ -2388,7 +2388,7 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
     } break;
 
     case STRUCT_INIT_EXPR: {
-      jai_log_at(ERROR, expr->stmt.pos, "<internal>: Cannot directly compile a struct initialization\n");
+      zen_log_at(ERROR, expr->stmt.pos, "<internal>: Cannot directly compile a struct initialization\n");
     } break;
   }
 }
@@ -2402,7 +2402,7 @@ internal void _get_member_access_chain(String* res, ExpressionAST* expr) {
     string_append_char(res, '.');
     string_append(res, ((MemberAccessAST*) expr)->name);
   }
-  else {jai_log(DEBUG_ERROR, "Member access is only supported on variables\n"); }
+  else {zen_log(DEBUG_ERROR, "Member access is only supported on variables\n"); }
 }
 internal String get_member_access_chain(MemberAccessAST* acc) {
   String s = string_create(0);
@@ -2570,7 +2570,7 @@ internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
         }
       } else {
         /* TODO: pretty-print expression types */
-        jai_log_at(ERROR, ass->stmt.pos, "Assignment to expression of type %i is not allowed\n", ass->lhs->expr_type);
+        zen_log_at(ERROR, ass->stmt.pos, "Assignment to expression of type %i is not allowed\n", ass->lhs->expr_type);
       }
     } break;
 
@@ -2600,7 +2600,7 @@ internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
     } break;
 
     case UNKNOWN_STMT: {
-      jai_log(DEBUG_ERROR, "Trying to compile an unknown statement type???\n");
+      zen_log(DEBUG_ERROR, "Trying to compile an unknown statement type???\n");
     } break;
 
   }
@@ -2625,14 +2625,14 @@ int main(int argc, char const *argv[]) {
 
 
   if (argc == 1) {
-    jai_log_at(ERROR, prev_pos, "Usage: %s <filename>\n", argv[0]);
+    zen_log_at(ERROR, prev_pos, "Usage: %s <filename>\n", argv[0]);
     return 1;
   }
   else {
     next_pos.file = (char*) argv[1];
     file = fopen(argv[1], "r");
     if (!file) {
-      jai_log_at(ERROR, prev_pos, "Could not open file %s\n", argv[1]);
+      zen_log_at(ERROR, prev_pos, "Could not open file %s\n", argv[1]);
       return 1;
     }
   }
@@ -2687,18 +2687,18 @@ int main(int argc, char const *argv[]) {
             FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
             fun->body.parent_scope = global_scope;
             array_push_val(&statements, &stmt);
-            jai_log(DEBUG_INFO, "Adding function definition %s\n", ((FunctionDeclarationAST*) stmt)->name);
+            zen_log(DEBUG_INFO, "Adding function definition %s\n", ((FunctionDeclarationAST*) stmt)->name);
           } break;
           case VARIABLE_DECLARATION_STMT: {
             array_push_val(&statements, &stmt);
-            jai_log(DEBUG_INFO, "Adding variable declaration %s with declared type %s\n", ((VariableDeclarationAST*) stmt)->name, print_type_ast_name(((VariableDeclarationAST*) stmt)->type_ast));
+            zen_log(DEBUG_INFO, "Adding variable declaration %s with declared type %s\n", ((VariableDeclarationAST*) stmt)->name, print_type_ast_name(((VariableDeclarationAST*) stmt)->type_ast));
           } break;
           case STRUCT_DECLARATION_STMT: {
             array_push_val(&statements, &stmt);
-            jai_log(DEBUG_INFO, "Adding type $t\n", &((StructDeclarationAST*) stmt)->str);
+            zen_log(DEBUG_INFO, "Adding type $t\n", &((StructDeclarationAST*) stmt)->str);
           } break;
           default:
-            jai_log_at(ERROR, stmt->pos, "Only variable, struct and function definitions allowed at global scope\n");
+            zen_log_at(ERROR, stmt->pos, "Only variable, struct and function definitions allowed at global scope\n");
             break;
         }
       } else {
@@ -2713,7 +2713,7 @@ int main(int argc, char const *argv[]) {
     array_free(&statements);
 
     if (found_error) {
-      jai_log(ERROR, "Exiting due to previous errors\n");
+      zen_log(ERROR, "Exiting due to previous errors\n");
       return 1;
     }
 
@@ -2722,7 +2722,7 @@ int main(int argc, char const *argv[]) {
     doTypeInferenceForScope(global_scope);
 
     if (found_error) {
-      jai_log(ERROR, "Exiting due to previous errors\n");
+      zen_log(ERROR, "Exiting due to previous errors\n");
       return 1;
     }
 
@@ -2731,8 +2731,8 @@ int main(int argc, char const *argv[]) {
     {
       DynArray mains = getFunctionDeclarations("main", global_scope);
       if (array_count(&mains) == 1) {
-        FunctionDeclarationAST* jai_main = *(FunctionDeclarationAST**) array_get(&mains, 0);
-        if (jai_main->num_args == 0) {
+        FunctionDeclarationAST* zen_main = *(FunctionDeclarationAST**) array_get(&mains, 0);
+        if (zen_main->num_args == 0) {
           /* TODO: check signature of main */
           FILE* header = tmpfile();
           FILE* body = tmpfile();
@@ -2830,7 +2830,7 @@ int main(int argc, char const *argv[]) {
             }
 
             /* TODO: check signature of main */
-            print(tail, "int main(int argc, const char* argv[]) {\n\t$f();\n};\n", jai_main);
+            print(tail, "int main(int argc, const char* argv[]) {\n\t$f();\n};\n", zen_main);
             array_free(&mains);
 
             {
@@ -2868,14 +2868,14 @@ int main(int argc, char const *argv[]) {
                 }
                 fclose(tail);
               } else {
-                jai_log(ERROR, "Could not open output file '/tmp/output.c'\n");
+                zen_log(ERROR, "Could not open output file '/tmp/output.c'\n");
               }
 
             }
-          } else {jai_log(ERROR, "Failed to open temp files\n"); }
-        } else {jai_log_at(ERROR, jai_main->body.stmt.pos, "main must not take any arguments");}
-      } else if (array_count(&mains) > 1) {jai_log(ERROR, "Only one main can be defined"); }
-      else {jai_log(ERROR, "No main function declared\n"); }
+          } else {zen_log(ERROR, "Failed to open temp files\n"); }
+        } else {zen_log_at(ERROR, zen_main->body.stmt.pos, "main must not take any arguments");}
+      } else if (array_count(&mains) > 1) {zen_log(ERROR, "Only one main can be defined"); }
+      else {zen_log(ERROR, "No main function declared\n"); }
     }
   }
   return 0;

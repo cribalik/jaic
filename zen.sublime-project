@@ -8,18 +8,18 @@
   "build_systems":
   [
     {
-      "name": "jaic",
-      "shell_cmd": "gcc -ansi -pedantic -g -Wall -Wextra -DLINUX ${project_path}/src/jaic.c -o ${project_path}/build/jaic",
+      "name": "zenc",
+      "shell_cmd": "gcc -ansi -pedantic -g -Wall -Wextra -DLINUX ${project_path}/src/zenc.c -o ${project_path}/build/zenc",
       "file_regex": "^([^ ][^:]+):([0-9]+):?([0-9]+)?:? (.*)$",
       "working_dir": ".",
       "selector": "source.c"
     } ,
     {
-      "name": "jai",
-      "shell_cmd": "${project_path}/build/jaic ${file}",
+      "name": "zen",
+      "shell_cmd": "${project_path}/build/zenc ${file}",
       "file_regex": "^([^:]+):([0-9]+):?([0-9]+)?.*?error:(.*)$",
       "working_dir": ".",
-      "selector": "source.jai"
+      "selector": "source.zen"
     } 
   ]
 }
