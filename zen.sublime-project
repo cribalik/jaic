@@ -9,7 +9,7 @@
   [
     {
       "name": "zenc",
-      "shell_cmd": "gcc -ansi -pedantic -g -Wall -Wextra -DLINUX ${project_path}/src/zenc.c -o ${project_path}/build/zenc",
+      "shell_cmd": "gcc -ansi -pedantic -g -Wall -Wextra -DLINUX ${project_path}/src/zen.c -o ${project_path}/build/zenc",
       "file_regex": "^([^ ][^:]+):([0-9]+):?([0-9]+)?:? (.*)$",
       "working_dir": ".",
       "selector": "source.c"

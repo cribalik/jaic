@@ -394,6 +394,8 @@ internal char* print_token() {
       return "<eof>";
     case TOK_ARROW:
       return "->";
+    case TOK_DOUBLEDOT:
+      return "..";
     default:
       buffer[0] = token;
       return buffer;
@@ -753,41 +755,6 @@ typedef enum IdentifierType {
 internal StatementAST* parseStatement();
 internal bool parseType(TypeAST*);
 
-internal int parse_block(CompoundStatementAST* result, DynArray* prefix) {
-  DynArray statements;
-  DynArray* array;
-  if (token != '{') {
-    return 1;
-  }
-  eatToken();
-  if (prefix) {
-    array = prefix;
-  } else {
-    array = &statements;
-    *array = array_create(32, sizeof(StatementAST*));
-  }
-  while (1) {
-    StatementAST* stmt;
-    if (token == '}') {
-      eatToken();
-      break;
-    }
-    stmt = parseStatement();
-    if (stmt) {
-      array_push_val(array, &stmt);
-    } else {
-      zen_log_at(ERROR, prev_pos, "Failed to parse statement\n");
-      array_free(array);
-      return 1;
-    }
-  }
-  result->num_statements = array_count(array);
-  result->statements = arena_push_array(array, &perm_arena);
-  result->stmt.type = COMPOUND_STMT;
-  array_free(array);
-  return 0;
-}
-
 internal ExpressionAST* parseExpression();
 internal ExpressionAST* parsePrimitive() {
   switch (token) {
@@ -964,6 +931,7 @@ internal ExpressionAST* parsePrimitive() {
           } else {zen_log_at(ERROR, prev_pos, "Expected identifier, instead found %s\n", print_token());}
 
           if (!success) {
+            /* we failed, eat everything to matching brace */
             while (token != '}') {
               eatToken();
             }
@@ -971,7 +939,6 @@ internal ExpressionAST* parsePrimitive() {
             ast = 0;
             break;
           }
-          /*we failed, eat everything to matching brace */
         }
         if (ast) {
           ast->members = arena_push_array(&members, &perm_arena);
@@ -1127,7 +1094,7 @@ internal StatementAST* _parseStatement() {
           loop->from = from;
 
           /* range loop? */
-          if (token == TOK_ARROW) {
+          if (token == TOK_DOUBLEDOT) {
             eatToken();
             loop->to = parseExpression();
             if (!loop->to) {
@@ -2835,7 +2802,7 @@ int main(int argc, char const *argv[]) {
 
             {
               char buf[256];
-              FILE* output = fopen("/tmp/output.c", "w");
+              FILE* output = fopen("output.c", "w");
 
               if (output) {
 
