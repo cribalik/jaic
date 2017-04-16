@@ -11,15 +11,15 @@ static char* UNBOLD = "";
 static char* RESET_FORMAT = "";
 static char* RESET_COLOR = "";
 
-static void enableFormatting() {
-  RED = "\\e[31m";
-  GREEN = "\\e[32m";
-  YELLOW = "\\e[33m";
-  BLUE = "\\e[34m";
-  BOLD = "\\e[1m";
-  UNBOLD = "\\e[21m";
-  RESET_FORMAT = "\\e[0m";
-  RESET_COLOR = "\\e[39m";
+static void enable_formatting() {
+  RED = "\x1B[31m";
+  GREEN = "\x1B[32m";
+  YELLOW = "\x1B[33m";
+  BLUE = "\x1B[34m";
+  BOLD = "\x1B[1m";
+  UNBOLD = "\x1B[21m";
+  RESET_FORMAT = "\x1B[0m";
+  RESET_COLOR = "\x1B[39m";
 }
 
 #endif /* JAIC_TERMINAL */

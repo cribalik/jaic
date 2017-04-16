@@ -13,11 +13,11 @@
       "file_regex": "^([^ ][^:]+):([0-9]+):?([0-9]+)?:? (.*)$",
       "working_dir": ".",
       "selector": "source.c"
-    } ,
+    },
     {
       "name": "zen",
-      "shell_cmd": "${project_path}/build/zenc ${file}",
-      "file_regex": "^([^:]+):([0-9]+):?([0-9]+)?.*?error:(.*)$",
+      "shell_cmd": "cd ${project_path}/build; ${project_path}/build/zenc ${file}",
+      "file_regex": "^([^ ^][^:]+):([0-9]+):?([0-9]+)?:? ?(.*)$",
       "working_dir": ".",
       "selector": "source.zen"
     } 

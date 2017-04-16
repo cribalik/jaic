@@ -1,9 +1,9 @@
-#define DEBUG 1
+#define DEBUG 0
 
 #include <stdio.h>
 #include "common.c"
-internal void print(FILE* file, char* fmt, ...);
-internal void vprint(FILE* file, char* fmt, va_list args);
+static void print(FILE* file, char* fmt, ...);
+static void vprint(FILE* file, char* fmt, va_list args);
 #include "terminal.c"
 #include "memarena.c"
 #include "array.c"
@@ -14,6 +14,7 @@ internal void vprint(FILE* file, char* fmt, va_list args);
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>
+#include <errno.h>
 
 #ifdef LINUX
   #include <unistd.h>
@@ -21,7 +22,7 @@ internal void vprint(FILE* file, char* fmt, va_list args);
 
 /* Logging */
 
-void printLine(FILE* out, char* filename, int line, int column) {
+void print_line(FILE* out, char* filename, int line, int column) {
   FILE* file;
   int i = 1;
   char c;
@@ -78,45 +79,46 @@ global bool found_error = false;
 #define NOTE _LOG_USER_INFO,__FILE__,__LINE__
 #define DEBUG_INFO _LOG_DEBUG_INFO,__FILE__,__LINE__
 #define DEBUG_ERROR _LOG_DEBUG_ERROR,__FILE__,__LINE__
+global int g_debug_level = DEBUG;
 typedef enum {
   _LOG_USER_ERROR,
   _LOG_USER_INFO,
   _LOG_DEBUG_INFO,
   _LOG_DEBUG_ERROR
 } _LogType;
-internal void zen_log_at(_LogType type, char* file, int line, FilePos filepos, char* fmt, ...) {
+static void zen_log_at(_LogType type, char* file, int line, FilePos filepos, char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   switch (type) {
-    case _LOG_USER_ERROR: {
+    case _LOG_USER_ERROR:
       fprintf(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, RED, RESET_COLOR, RESET_FORMAT);
       vprint(stderr, fmt, args);
-      printLine(stderr, filepos.file, filepos.line, filepos.column);
+      print_line(stderr, filepos.file, filepos.line, filepos.column);
       found_error = true;
-    } break;
-    case _LOG_USER_INFO: {
+      break;
+    case _LOG_USER_INFO:
       fprintf(stderr, "%s%s:%i:%i (%s:%i): %snote:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, GREEN, RESET_COLOR, RESET_FORMAT);
       vprint(stderr, fmt, args);
-      printLine(stderr, filepos.file, filepos.line, filepos.column);
-    } break;
-    case _LOG_DEBUG_INFO: {
-      if (DEBUG) {
+      print_line(stderr, filepos.file, filepos.line, filepos.column);
+      break;
+    case _LOG_DEBUG_INFO:
+      if (g_debug_level > 0) {
         fprintf(stderr, "%s%s:%i:%i (%s:%i): %sdebug:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, GREEN, RESET_COLOR, RESET_FORMAT);
         vprint(stderr, fmt, args);
-        printLine(stderr, filepos.file, filepos.line, filepos.column);
+        print_line(stderr, filepos.file, filepos.line, filepos.column);
       }
-    } break;
-    case _LOG_DEBUG_ERROR: {
-      if (DEBUG) {
+      break;
+    case _LOG_DEBUG_ERROR:
+      if (g_debug_level > 0) {
         fprintf(stderr, "%s%s:%i:%i (%s:%i): %serror:%s%s ", BOLD, filepos.file, filepos.line, filepos.column, file, line, RED, RESET_COLOR, RESET_FORMAT);
         vprint(stderr, fmt, args);
-        printLine(stderr, filepos.file, filepos.line, filepos.column);
+        print_line(stderr, filepos.file, filepos.line, filepos.column);
       }
-    } break;
+      break;
   }
   va_end(args);
 }
-internal void zen_log(_LogType type, char* file, int line, char* fmt, ...) {
+static void zen_log(_LogType type, char* file, int line, char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   switch (type) {
@@ -155,18 +157,21 @@ typedef enum {
   TOK_STRUCT = -8,
   TOK_LOOP = -9,
   TOK_DOUBLEDOT = -10,
-  TOK_RETURN = -11,
-  TOK_FN = -12,
-  TOK_VAR = -13
+  TOK_TRIPLEDOT = -11,
+  TOK_RETURN = -12,
+  TOK_FN = -13,
+  TOK_VAR = -14,
+  TOK_STRING = -15
 } Token;
 
 /* values set by the tokenizer */
-global char* identifierStr;
-global double floatVal;
-global int intVal;
+global char* g_identifier_str;
+global double g_float_val;
+global int g_int_val;
+global char* g_string_val;
 
 /* the input source file */
-global FILE* file;
+global FILE* g_file;
 
 #define MAIN_MEMORY_SIZE 64*1024*1024
 
@@ -197,7 +202,7 @@ global FilePos next_pos;
 /** Tokenizer stuff **/
 
 global int num_chars_read = 0;
-internal char getChar(FILE* file) {
+static char getChar(FILE* file) {
   char c = getc(file);
   /* zen_log(DEBUG_INFO, "%i: %c\n", num_chars_read, c); */
   ++num_chars_read;
@@ -210,23 +215,23 @@ internal char getChar(FILE* file) {
 }
 
 global int curr_char = ' ';
-internal void eatWhitespace() {
-  while (isspace(curr_char)) curr_char = getChar(file);
+static void eatWhitespace() {
+  while (isspace(curr_char)) curr_char = getChar(g_file);
 }
-internal int gettok() {
+static int gettok() {
   #define BUFFER_SIZE 512
   static char buf[BUFFER_SIZE];
 
   while (isspace(curr_char)) {
-    curr_char = getChar(file);
+    curr_char = getChar(g_file);
   }
 
   /* check for comments */
   while (curr_char == '/') {
-    curr_char = getChar(file);
+    curr_char = getChar(g_file);
     if (curr_char == '/') {
       do {
-        curr_char = getChar(file);
+        curr_char = getChar(g_file);
       } while (curr_char != EOF && curr_char != '\n' && curr_char != '\r');
       if (curr_char == EOF) {
         return TOK_EOF;
@@ -235,20 +240,20 @@ internal int gettok() {
     }
     else if (curr_char == '*') {
       int depth = 1;
-      curr_char = getChar(file);
+      curr_char = getChar(g_file);
       while (1) {
         if (curr_char == '*') {
-          curr_char = getChar(file);
+          curr_char = getChar(g_file);
           if (curr_char == '/') {
             --depth;
             if (depth == 0) {
-              curr_char = getChar(file);
+              curr_char = getChar(g_file);
               goto endofcomment;
             }
           }
         }
         else if (curr_char == '/') {
-          curr_char = getChar(file);
+          curr_char = getChar(g_file);
           if (curr_char == '*') {
             ++depth;
           }
@@ -256,24 +261,30 @@ internal int gettok() {
           printf("File ended while still in block comment\n");
           return TOK_UNKNOWN;
         }
-        curr_char = getChar(file);
+        curr_char = getChar(g_file);
       }
     }
     else {
       return '/';
     }
     endofcomment:
-    while (isspace(curr_char)) {curr_char = getChar(file);};
+    while (isspace(curr_char)) {curr_char = getChar(g_file);};
   }
 
   prev_pos = next_pos;
+
+  /* at */
+  if (curr_char == '@') {
+    curr_char = getChar(g_file);
+    return '@';
+  }
 
   /* identifier */
   if (isalpha(curr_char)) {
     int i = 0;
     for (i = 0; i < BUFFER_SIZE && (isalpha(curr_char) || isdigit(curr_char) || curr_char=='_'); ++i) {
       buf[i] = curr_char;
-      curr_char = getChar(file);
+      curr_char = getChar(g_file);
     }
     if (i == BUFFER_SIZE) {
       printf("Reached identifier size limit\n");
@@ -281,18 +292,18 @@ internal int gettok() {
     }
     else {
       buf[i] = '\0';
-      identifierStr = buf;
-      if (strcmp(identifierStr, "type") == 0) {
+      g_identifier_str = buf;
+      if (strcmp(g_identifier_str, "type") == 0) {
         return TOK_STRUCT;
-      } else if (strcmp(identifierStr, "loop") == 0) {
+      } else if (strcmp(g_identifier_str, "loop") == 0) {
         return TOK_LOOP;
-      } else if (strcmp(identifierStr, "for") == 0) {
+      } else if (strcmp(g_identifier_str, "for") == 0) {
         return TOK_LOOP;
-      } else if (strcmp(identifierStr, "return") == 0) {
+      } else if (strcmp(g_identifier_str, "return") == 0) {
         return TOK_RETURN;
-      } else if (strcmp(identifierStr, "fn") == 0) {
+      } else if (strcmp(g_identifier_str, "fn") == 0) {
         return TOK_FN;
-      } else if (strcmp(identifierStr, "var") == 0) {
+      } else if (strcmp(g_identifier_str, "var") == 0) {
         return TOK_VAR;
       } else {
         return TOK_IDENTIFIER;
@@ -300,12 +311,38 @@ internal int gettok() {
     }
   }
 
+  /* string literal */
+  else if (curr_char == '"') {
+    int i;
+    char last_char;
+    last_char = '"';
+    curr_char = getChar(g_file);
+    for (i  = 0; i < BUFFER_SIZE; ++i) {
+      if (curr_char == '"' && last_char != '\\') {
+        curr_char = getChar(g_file);
+        break;
+      }
+      buf[i] = curr_char;
+      last_char = curr_char;
+      curr_char = getChar(g_file);
+    }
+
+    if (i == BUFFER_SIZE) {
+      zen_log_at(ERROR, prev_pos, "Reached max size for string (%i)\n", BUFFER_SIZE);
+      return TOK_UNKNOWN;
+    }
+
+    buf[i] = '\0';
+    g_string_val = buf;
+    return TOK_STRING;
+  }
+
   /* number literal */
   else if (isdigit(curr_char)) {
     int i;
     for (i = 0; i < BUFFER_SIZE && isdigit(curr_char); ++i) {
       buf[i] = curr_char;
-      curr_char = getChar(file);
+      curr_char = getChar(g_file);
     }
 
     if (i == BUFFER_SIZE) {
@@ -313,11 +350,11 @@ internal int gettok() {
     }
     else if (curr_char == '.') {
       buf[i++] = '.';
-      curr_char = getChar(file);
+      curr_char = getChar(g_file);
       if (isdigit(curr_char)) {
         for (; i < BUFFER_SIZE && isdigit(curr_char); ++i) {
           buf[i] = curr_char;
-          curr_char = getChar(file);
+          curr_char = getChar(g_file);
         }
 
         if (i == BUFFER_SIZE) {
@@ -326,7 +363,7 @@ internal int gettok() {
         /* TODO: check for suffixes here e.g. 30.0f */
         else {
           buf[i] = '\0';
-          floatVal = strtod(buf, NULL);
+          g_float_val = strtod(buf, NULL);
           return TOK_FLOAT;
         }
       } else {
@@ -336,7 +373,7 @@ internal int gettok() {
     /* TODO: check for suffixes here e.g. 10u32 */
     else {
       buf[i] = '\0';
-      intVal = atoi(buf);
+      g_int_val = atoi(buf);
       return TOK_INT;
     }
   }
@@ -348,9 +385,9 @@ internal int gettok() {
 
   /* arrow */
   else if (curr_char == '-') {
-    curr_char = getChar(file);
+    curr_char = getChar(g_file);
     if (curr_char == '>') {
-      curr_char = getChar(file);
+      curr_char = getChar(g_file);
       return TOK_ARROW;
     } else {
       return '-';
@@ -359,10 +396,14 @@ internal int gettok() {
 
   /* double dots */
   else if (curr_char == '.') {
-    curr_char = getChar(file);
+    curr_char = getChar(g_file);
     if (curr_char == '.') {
-      curr_char = getChar(file);
-      return TOK_DOUBLEDOT;
+      curr_char = getChar(g_file);
+      if (curr_char != '.') {
+        return TOK_DOUBLEDOT;
+      }
+      curr_char = getChar(g_file);
+      return TOK_TRIPLEDOT;
     } else {
       return '.';
     }
@@ -370,7 +411,7 @@ internal int gettok() {
 
   else {
     int r = curr_char;
-    curr_char = getChar(file);
+    curr_char = getChar(g_file);
     return r;
   }
 
@@ -378,10 +419,10 @@ internal int gettok() {
   #undef BUFFER_SIZE
 }
 
-global int token;
-internal char* print_token() {
-  static char buffer[2];
-  switch (token) {
+global int g_token;
+static char* print_token() {
+  static char buffer[2] = {0};
+  switch (g_token) {
     case TOK_FLOAT:
       return "<float>";
     case TOK_INT:
@@ -389,38 +430,40 @@ internal char* print_token() {
     case TOK_UNKNOWN:
       return "<unknown>";
     case TOK_IDENTIFIER:
-      return identifierStr;
+      return g_identifier_str;
     case TOK_EOF:
       return "<eof>";
     case TOK_ARROW:
       return "->";
     case TOK_DOUBLEDOT:
       return "..";
+    case TOK_TRIPLEDOT:
+      return "...";
     default:
-      buffer[0] = token;
+      buffer[0] = g_token;
       return buffer;
   }
   UNREACHABLE;
 }
 
 global int num_chars_last_read = 0;
-internal void eatToken() {
+static void eatToken() {
   /* zen_log(DEBUG_INFO, "before gettok: line: %i column: %i\n", prev_pos.line, prev_pos.column); */
   int i = num_chars_read;
-  token = gettok();
+  g_token = gettok();
   eatWhitespace();
   num_chars_last_read = num_chars_read - i;
-  /* zen_log(DEBUG_INFO, "last read: %i token: %s\n", num_chars_last_read, print_token()); */
+  /* zen_log(DEBUG_INFO, "last read: %i g_token: %s\n", num_chars_last_read, print_token()); */
 }
 
-internal void goto_matching_brace() {
+static void goto_matching_brace() {
   FilePos pos = prev_pos;
   int d = 0;
   while (d) {
     eatToken();
-    if (token == '{') ++d;
-    else if (token == '}') --d;
-    else if (token == EOF) {
+    if (g_token == '{') ++d;
+    else if (g_token == '}') --d;
+    else if (g_token == EOF) {
       zen_log_at(ERROR, pos, "No matching brace found\n");
       return;
     }
@@ -488,6 +531,8 @@ typedef enum TypeClass {
 
   USIZE_TYPE, /* size_t */
 
+  STRING_TYPE,
+
   STRUCT_TYPE,
 
   ARRAY_TYPE,
@@ -516,6 +561,7 @@ typedef struct PartialTypeAST {
   } static_array;
 } PartialTypeAST;
 typedef struct TypeAST {
+  FilePos pos;
   int num_partial_types;
   PartialTypeAST* partial_types;
   char* name;
@@ -539,6 +585,7 @@ global char* builtin_typenames[] = {
   "i32",
   "i64",
   "usize",
+  "string"
 };
 
 global Type builtin_types[19];
@@ -593,7 +640,8 @@ typedef enum ExpressionType {
   MEMBER_ACCESS_EXPR,
   STRUCT_INIT_EXPR,
   BINOP_EXPR,
-  ARRAY_SUBSCRIPT_EXPR
+  ARRAY_SUBSCRIPT_EXPR,
+  ADDRESSOF_AST
 } ExpressionType;
 
 typedef struct ExpressionAST {
@@ -618,8 +666,15 @@ typedef struct Constant {
     int16_t i16;
     int32_t i32;
     int64_t i64;
+    char* str;
   } value;
 } Constant;
+
+static void init_constant(Constant* c, FilePos pos, TypeClass type) {
+  c->expr.expr_type = LITERAL_EXPR;
+  c->expr.stmt.pos = pos;
+  c->expr.type = builtin_types + type;
+}
 
 typedef struct MemberAccessAST {
   ExpressionAST expr;
@@ -648,7 +703,7 @@ typedef struct VariableGetAST {
   char* name;
 } VariableGetAST;
 
-internal VariableGetAST create_variable_get_ast(char *name, Type* type) {
+static VariableGetAST create_variable_get_ast(char *name, Type* type) {
   VariableGetAST result = {0};
   result.expr.expr_type = VARIABLE_GET_EXPR;
   result.expr.type = type;
@@ -686,6 +741,17 @@ typedef struct BinaryExpressionAST {
   ExpressionAST* rhs;
 } BinaryExpressionAST;
 
+typedef struct AddressOfAST {
+  ExpressionAST expr;
+  ExpressionAST* base;
+} AddressOfAST;
+
+static AddressOfAST create_addressof_ast() {
+  AddressOfAST result = {0};
+  result.expr.expr_type = ADDRESSOF_AST;
+  return result;
+}
+
 typedef struct VariableDeclarationAST {
   StatementAST stmt;
   char* name;
@@ -702,6 +768,10 @@ typedef struct LoopAST {
   ExpressionAST* to;
 } LoopAST;
 
+typedef enum FunctionFlags {
+  FUN_FOREIGN,
+  FUN_VARARG
+} FunctionFlags;
 typedef VariableDeclarationAST ArgumentAST;
 typedef struct FunctionDeclarationAST {
   CompoundStatementAST body;
@@ -712,7 +782,7 @@ typedef struct FunctionDeclarationAST {
   TypeAST return_type_ast;
   Type* return_type;
   FilePos pos;
-  bool is_foreign;
+  uint32_t flags;
 } FunctionDeclarationAST;
 
 typedef struct AssignmentAST {
@@ -721,7 +791,7 @@ typedef struct AssignmentAST {
   ExpressionAST* rhs;
 } AssignmentAST;
 
-internal char* print_type_ast_name(TypeAST type) {
+static char* print_type_ast_name(TypeAST type) {
   String res;
   int i;
   if (!type.name) return 0;
@@ -737,8 +807,8 @@ internal char* print_type_ast_name(TypeAST type) {
   return string_get(&res);
 }
 
-internal int test() {
-  arrayTest();
+static int test() {
+  array_test();
   return 0;
 }
 
@@ -752,33 +822,35 @@ typedef enum IdentifierType {
 
 /** 1st pass: Parsing **/
 
-internal StatementAST* parseStatement();
-internal bool parseType(TypeAST*);
+static StatementAST* parseStatement();
+static bool parseType(TypeAST*);
 
-internal ExpressionAST* parseExpression();
-internal ExpressionAST* parsePrimitive() {
-  switch (token) {
+static ExpressionAST* parseExpression();
+static ExpressionAST* parsePrimitive() {
+  switch (g_token) {
     case TOK_FLOAT: {
       Constant* f = arena_push(&perm_arena, sizeof(Constant));
-      f->expr.expr_type = LITERAL_EXPR;
-      f->expr.stmt.pos = prev_pos;
-      f->value.float_val = floatVal;
-      f->expr.type = &builtin_types[FLOAT_TYPE];
+      init_constant(f, prev_pos, FLOAT_TYPE);
+      f->value.float_val = g_float_val;
       eatToken();
       zen_log(DEBUG_INFO, "Found a float literal with value %f\n", f->value.f32);
-      return &f->expr;
-    } break;
+      return &f->expr; }
 
     case TOK_INT: {
       Constant* i = arena_push(&perm_arena, sizeof(Constant));
-      i->expr.expr_type = LITERAL_EXPR;
-      i->expr.stmt.pos = prev_pos;
-      i->value.int_val = intVal;
-      i->expr.type = &builtin_types[INT_TYPE];
+      init_constant(i, prev_pos, INT_TYPE);
+      i->value.int_val = g_int_val;
       eatToken();
       zen_log(DEBUG_INFO, "Found an int literal with value %i\n", i->value.int_val);
-      return &i->expr;
-    } break;
+      return &i->expr; }
+
+    case TOK_STRING: {
+      Constant* s = arena_push(&perm_arena, sizeof(Constant));
+      init_constant(s, prev_pos, STRING_TYPE);
+      s->value.str = arena_push_string(&perm_arena, g_string_val);
+      eatToken();
+      zen_log(DEBUG_INFO, "Found a string literal with value %s\n", s->value.str);
+      return &s->expr; }
 
     case TOK_IDENTIFIER: {
       VariableGetAST* var;
@@ -787,14 +859,14 @@ internal ExpressionAST* parsePrimitive() {
       var = arena_push(&perm_arena, sizeof(VariableGetAST));
       var->expr.stmt.pos = prev_pos;
       var->expr.expr_type = VARIABLE_GET_EXPR;
-      var->name = arena_push_string(&perm_arena, identifierStr);
+      var->name = arena_push_string(&perm_arena, g_identifier_str);
       result = &var->expr;
       eatToken();
 
       while (1) {
 
         /* function call? */
-        if (token == '(') {
+        if (g_token == '(') {
           CallAST* call;
           DynArray args;
           call = arena_push(&perm_arena, sizeof(CallAST));
@@ -807,7 +879,7 @@ internal ExpressionAST* parsePrimitive() {
           /* get args */
           while (1) {
             ExpressionAST* expr = 0;
-            if (token == ')') {
+            if (g_token == ')') {
               eatToken();
               break;
             }
@@ -821,14 +893,16 @@ internal ExpressionAST* parsePrimitive() {
 
             array_push_val(&args, &expr);
 
-            if (token == ')') {
+            if (g_token == ')') {
               eatToken();
               break;
             }
-            if (token == ',') {
+            if (g_token == ',') {
               eatToken();
             } else {
               zen_log_at(ERROR, prev_pos, "Expected ',' between function input parameters\n");
+              while (g_token != ')' && g_token != TOK_EOF) eatToken();
+              break;
             }
           }
 
@@ -842,7 +916,7 @@ internal ExpressionAST* parsePrimitive() {
           result = &call->expr;
         }
         /* array element? */
-        else if (token == '[') {
+        else if (g_token == '[') {
           ArraySubscriptAST* as;
           as = arena_push(&perm_arena, sizeof(ArraySubscriptAST));
           as->expr.expr_type = ARRAY_SUBSCRIPT_EXPR;
@@ -852,7 +926,7 @@ internal ExpressionAST* parsePrimitive() {
 
           as->subscript = parseExpression();
           if (as->subscript) {
-            if (token == ']') {
+            if (g_token == ']') {
               eatToken();
               result = &as->expr;
             } else {
@@ -865,14 +939,14 @@ internal ExpressionAST* parsePrimitive() {
           }
         }
         /* member access? */
-        else if (token == '.') {
+        else if (g_token == '.') {
           eatToken();
-          if (token == TOK_IDENTIFIER) {
+          if (g_token == TOK_IDENTIFIER) {
             MemberAccessAST* ast = arena_push(&perm_arena, sizeof(MemberAccessAST));
             ast->expr.expr_type = MEMBER_ACCESS_EXPR;
             ast->expr.stmt.pos = prev_pos;
             ast->base = result;
-            ast->name = arena_push_string(&perm_arena, identifierStr);
+            ast->name = arena_push_string(&perm_arena, g_identifier_str);
             result = &ast->expr;
             eatToken();
           } else {
@@ -885,19 +959,17 @@ internal ExpressionAST* parsePrimitive() {
         }
 
       }
-      return result;
-    } break;
+      return result; }
 
     case '(': {
       ExpressionAST* result;
       eatToken();
       result = parseExpression();
-      if (!result || token != ')') {
+      if (!result || g_token != ')') {
         return 0;
       }
       eatToken();
-      return result;
-    } break;
+      return result; }
 
     case '{': {
       StructInitializationAST* ast;
@@ -905,22 +977,22 @@ internal ExpressionAST* parsePrimitive() {
       ast = arena_push(&perm_arena, sizeof(StructInitializationAST));
       ast->expr.expr_type = STRUCT_INIT_EXPR;
       ast->expr.stmt.pos = prev_pos;
-      if (token != '}') {
+      if (g_token != '}') {
         DynArray members = array_create(4, sizeof(MemberInitializationAST));
         while (1) {
           MemberInitializationAST* member = array_push(&members);
           bool success = false;
-          if (token == TOK_IDENTIFIER) {
-            member->name = arena_push_string(&perm_arena, identifierStr);
+          if (g_token == TOK_IDENTIFIER) {
+            member->name = arena_push_string(&perm_arena, g_identifier_str);
             eatToken();
-            if (token == '=') {
+            if (g_token == ':') {
               eatToken();
               member->value = parseExpression();
               if (member->value) {
-                if (token == ',') {
+                if (g_token == ',') {
                   eatToken();
                   success = true;
-                } else if (token == '}') {
+                } else if (g_token == '}') {
                   eatToken();
                   break;
                 } else {
@@ -932,7 +1004,7 @@ internal ExpressionAST* parsePrimitive() {
 
           if (!success) {
             /* we failed, eat everything to matching brace */
-            while (token != '}') {
+            while (g_token != '}') {
               eatToken();
             }
             eatToken();
@@ -948,21 +1020,23 @@ internal ExpressionAST* parsePrimitive() {
       } else {
         eatToken();
       }
-      if (ast) {
-        return &ast->expr;
-      } else {
-        return 0;
-      }
-    } break;
+      return (ExpressionAST*)ast; }
 
-    default: {
+    case '@': {
+      AddressOfAST* result;
+      eatToken();
+      result = arena_push(&perm_arena, sizeof(AddressOfAST));
+      *result = create_addressof_ast();
+      result->base = parseExpression();
+      return (ExpressionAST*)result; }
+
+    default:
       zen_log_at(ERROR, prev_pos, "Failed to parse expression\n");
       return 0;
-    } break;
   }
 }
 
-internal int binopPrecedence(char op) {
+static int binopPrecedence(char op) {
   switch (op) {
     case '-': return 10;
     case '+': return 10;
@@ -975,14 +1049,14 @@ internal int binopPrecedence(char op) {
   }
 }
 
-internal ExpressionAST* parseExpression() {
+static ExpressionAST* parseExpression() {
   ExpressionAST* expr = parsePrimitive();
   if (expr) {
-    if (binopPrecedence(token)) {
+    if (binopPrecedence(g_token)) {
       BinaryExpressionAST* bin = arena_push(&perm_arena, sizeof(BinaryExpressionAST));
       bin->expr.expr_type = BINOP_EXPR;
       bin->expr.stmt.pos = prev_pos;
-      bin->operator = token;
+      bin->operator = g_token;
       bin->lhs = expr;
       zen_log_at(DEBUG_INFO, prev_pos, "Found binary expression with operator %s\n", print_token());
       eatToken();
@@ -994,16 +1068,17 @@ internal ExpressionAST* parseExpression() {
   return expr;
 }
 
-internal bool parseType(TypeAST* result) {
+static bool parseType(TypeAST* result) {
   bool partial_success = false;
-
   DynArray partial_types = array_create(4, sizeof(PartialTypeAST));
+  result->pos = prev_pos;
+
 
   while (1) {
-    if (token == '[') {
+    if (g_token == '[') {
       partial_success = true;
       eatToken();
-      if (token == ']') {
+      if (g_token == ']') {
         PartialTypeAST* type = array_push(&partial_types);
         type->class = ARRAY_TYPE_AST;
         eatToken();
@@ -1011,7 +1086,7 @@ internal bool parseType(TypeAST* result) {
       } else {
         ExpressionAST* expr = parseExpression();
         if (expr) {
-          if (token == ']') {
+          if (g_token == ']') {
             PartialTypeAST* type = array_push(&partial_types);
             type->class = STATIC_ARRAY_TYPE_AST;
             type->static_array.size = expr;
@@ -1021,7 +1096,7 @@ internal bool parseType(TypeAST* result) {
         } else {zen_log_at(ERROR, prev_pos, "Expected ']' or constant after '[' (array type)\n");}
       }
     }
-    else if (token == '^') {
+    else if (g_token == '^') {
       PartialTypeAST* type;
       partial_success = true;
       eatToken();
@@ -1036,8 +1111,8 @@ internal bool parseType(TypeAST* result) {
     return false;
   }
 
-  if (token == TOK_IDENTIFIER) {
-    result->name = arena_push_string(&perm_arena, identifierStr);
+  if (g_token == TOK_IDENTIFIER) {
+    result->name = arena_push_string(&perm_arena, g_identifier_str);
     eatToken();
   } else {
     if (partial_success) {
@@ -1055,10 +1130,10 @@ internal bool parseType(TypeAST* result) {
   return true;
 }
 
-internal StatementAST* _parseStatement() {
+static StatementAST* _parseStatement() {
   FilePos pos_of_identifier = prev_pos;
 
-  if (token == TOK_LOOP) {
+  if (g_token == TOK_LOOP) {
     LoopAST* loop = arena_push(&perm_arena, sizeof(LoopAST));
     loop->body.stmt.type = LOOP_STMT;
     loop->body.stmt.pos = prev_pos;
@@ -1066,17 +1141,17 @@ internal StatementAST* _parseStatement() {
     loop->index.type = &builtin_types[INT_TYPE];
     eatToken();
 
-    if (token == TOK_IDENTIFIER || token == '_') {
-      if (token == TOK_IDENTIFIER) {
-        loop->iter.name = arena_push_string(&perm_arena, identifierStr);
+    if (g_token == TOK_IDENTIFIER || g_token == '_') {
+      if (g_token == TOK_IDENTIFIER) {
+        loop->iter.name = arena_push_string(&perm_arena, g_identifier_str);
         loop->iter.stmt.pos = prev_pos;
       }
       eatToken();
 
-      if (token == ',') {
+      if (g_token == ',') {
         eatToken();
-        if (token == TOK_IDENTIFIER) {
-          loop->index.name = arena_push_string(&perm_arena, identifierStr);
+        if (g_token == TOK_IDENTIFIER) {
+          loop->index.name = arena_push_string(&perm_arena, g_identifier_str);
           loop->index.stmt.pos = prev_pos;
           eatToken();
         } else {
@@ -1085,7 +1160,7 @@ internal StatementAST* _parseStatement() {
         }
       }
 
-      if (token == ':') {
+      if (g_token == ':') {
         ExpressionAST* from;
         eatToken();
 
@@ -1094,7 +1169,7 @@ internal StatementAST* _parseStatement() {
           loop->from = from;
 
           /* range loop? */
-          if (token == TOK_DOUBLEDOT) {
+          if (g_token == TOK_DOUBLEDOT) {
             eatToken();
             loop->to = parseExpression();
             if (!loop->to) {
@@ -1104,12 +1179,12 @@ internal StatementAST* _parseStatement() {
           }
 
           /* parse block */
-          if (token == '{') {
+          if (g_token == '{') {
             DynArray statements = array_create(16, sizeof(StatementAST*));
             eatToken();
             while (1) {
               StatementAST* stmt;
-              if (token == '}') {
+              if (g_token == '}') {
                 eatToken();
                 break;
               }
@@ -1135,7 +1210,7 @@ internal StatementAST* _parseStatement() {
     return 0;
   }
 
-  else if (token == TOK_RETURN) {
+  else if (g_token == TOK_RETURN) {
     ReturnAST* ast;
     eatToken();
     ast = arena_push(&perm_arena, sizeof(ReturnAST));
@@ -1147,7 +1222,7 @@ internal StatementAST* _parseStatement() {
     } else {zen_log_at(ERROR, ast->stmt.pos, "Failed to parse return statement\n");}
   }
 
-  else if (token == TOK_FN) {
+  else if (g_token == TOK_FN) {
     local_persist int functionID = 0;
     FunctionDeclarationAST* fun = arena_push(&perm_arena, sizeof(FunctionDeclarationAST));
     fun->body.stmt.type = FUNCTION_DECLARATION_STMT;
@@ -1155,48 +1230,59 @@ internal StatementAST* _parseStatement() {
     fun->pos = prev_pos;
     eatToken();
 
-    if (token == TOK_IDENTIFIER) {
-      fun->name = arena_push_string(&perm_arena, identifierStr);
+    if (g_token == TOK_IDENTIFIER) {
+      fun->name = arena_push_string(&perm_arena, g_identifier_str);
       eatToken();
 
       /* arguments */
-      if (token == '(') {
+      if (g_token == '(') {
         DynArray args = array_create(0, sizeof(ArgumentAST));
         eatToken();
         
 
         while (1) {
           ArgumentAST* arg;
-          if (token == ')') {
+          if (g_token == ')') {
             eatToken();
             break;
           }
-          arg = array_push(&args);
-          arg->stmt.pos = prev_pos;
-          if (token == TOK_IDENTIFIER) {
-            arg->name = arena_push_string(&perm_arena, identifierStr);
+          if (g_token == TOK_IDENTIFIER) {
+            arg = array_push(&args);
+            arg->stmt.pos = prev_pos;
+            arg->name = arena_push_string(&perm_arena, g_identifier_str);
             eatToken();
             zen_log(DEBUG_INFO, "Found parameter %s\n", arg->name);
 
-            if (token == ':') {
+            if (g_token == ':') {
               eatToken();
 
               if (parseType(&arg->type_ast)) {
                 zen_log(DEBUG_INFO, " - with type %s\n", print_type_ast_name(arg->type_ast));
                 /* TODO: default parameters */
 
-                if (token == ',') {
+                if (g_token == ',') {
                   eatToken();
                   continue;
                 }
-                else if (token == ')') {
+                else if (g_token == ')') {
                   eatToken();
                   break;
                 } else {zen_log_at(ERROR, prev_pos, "Expected ',' or ')' after parameter\n");}
               } else {zen_log_at(ERROR, prev_pos, "Type expected after ':'\n");}
             } else {zen_log_at(ERROR, prev_pos, "No type found after parameter name (did you forget a ':'?\n");}
-          } else {zen_log_at(ERROR, prev_pos, "Identifier expected in parameter list, found %s\n", print_token());}
+          }
+          else if (g_token == TOK_TRIPLEDOT) {
+            eatToken();
+            if (g_token == ')') {
+              eatToken();
+              fun->flags |= FUN_VARARG;
+              break;
+            } else {zen_log_at(ERROR, prev_pos, "Vararg must be at the end of parameter list\n");}
+          }
+          else {zen_log_at(ERROR, prev_pos, "Identifier expected in parameter list, found %s\n", print_token());}
+
           array_free(&args);
+          while (g_token != ')' && g_token != TOK_EOF) eatToken();
           return 0;
         }
         fun->num_args = array_count(&args);
@@ -1204,7 +1290,7 @@ internal StatementAST* _parseStatement() {
         array_free(&args);
 
         /* return value */
-        if (token == ':') {
+        if (g_token == ':') {
           eatToken();
           if (!parseType(&fun->return_type_ast)) {
             zen_log_at(ERROR, prev_pos, "Expected type after ':'");
@@ -1217,22 +1303,27 @@ internal StatementAST* _parseStatement() {
           /* Function body */
           fun->body.stmt.pos = prev_pos;
 
-          if (token == '#') {
+          if (g_token == '#') {
             eatToken();
-            if (token == TOK_IDENTIFIER && strcmp(identifierStr, "foreign") == 0) {
+            if (g_token == TOK_IDENTIFIER && strcmp(g_identifier_str, "foreign") == 0) {
               eatToken();
-              fun->is_foreign = true;
+              fun->flags |= FUN_FOREIGN;
             } else {
               zen_log_at(ERROR, prev_pos, "Invalid compiler directive, did you mean to use 'foreign' ?\n");
               return 0;
             }
           }
 
-          else if (token == '{') {
+          else if ((fun->flags & FUN_VARARG) && !(fun->flags & FUN_FOREIGN)) {
+            zen_log_at(ERROR, prev_pos, "Varags is only implemented for foreign functions only!");
+            return 0;
+          }
+
+          else if (g_token == '{') {
             DynArray statements = array_create(32, sizeof(StatementAST*));
             eatToken();
             while (1) {
-              if (token == '}') {
+              if (g_token == '}') {
                 eatToken();
                 break;
               } else {
@@ -1255,39 +1346,39 @@ internal StatementAST* _parseStatement() {
           zen_log(DEBUG_INFO, "Found a function definition with name %s, and %i arguments\n", fun->name, fun->num_args);
           return &fun->body.stmt;
         } else {zen_log_at(ERROR, prev_pos, "Failed to parse return type\n");}
-      } else {zen_log_at(ERROR, prev_pos, "token %s not start of a function prototype\n", print_token(token));}
+      } else {zen_log_at(ERROR, prev_pos, "g_token %s not start of a function prototype\n", print_token(g_token));}
     } else {zen_log_at(ERROR, prev_pos, "Expected function name, found %s\n", print_token());}
     return 0;
   }
 
   /* struct? */
-  else if (token == TOK_STRUCT) {
+  else if (g_token == TOK_STRUCT) {
     StructDeclarationAST* decl = arena_push(&perm_arena, sizeof(StructDeclarationAST));
     decl->stmt.type = STRUCT_DECLARATION_STMT;
     decl->stmt.pos = pos_of_identifier;
     decl->str.type.type = STRUCT_TYPE;
     eatToken();
 
-    if (token == TOK_IDENTIFIER) {
-      decl->str.name = arena_push_string(&perm_arena, identifierStr);
+    if (g_token == TOK_IDENTIFIER) {
+      decl->str.name = arena_push_string(&perm_arena, g_identifier_str);
       eatToken();
 
-      if (token == '{') {
+      if (g_token == '{') {
         DynArray members = array_create(4, sizeof(MemberAST));
         eatToken();
 
         /* members */
         while (1) {
           MemberAST* member = array_push(&members);
-          if (token == TOK_IDENTIFIER) {
-            member->name = arena_push_string(&perm_arena, identifierStr);
+          if (g_token == TOK_IDENTIFIER) {
+            member->name = arena_push_string(&perm_arena, g_identifier_str);
             member->pos = prev_pos;
             eatToken();
-            if (token == ':') {
+            if (g_token == ':') {
               eatToken();
               /* TODO: parse default value */
               if (parseType(&member->type_ast)) {
-                if (token == '}') {
+                if (g_token == '}') {
                   eatToken();
                   break;
                 } else {
@@ -1296,7 +1387,7 @@ internal StatementAST* _parseStatement() {
               } else { zen_log_at(ERROR, prev_pos, "No type after member\n"); }
             } else { zen_log_at(ERROR, prev_pos, "No type after member. Did you forget a ':'?\n"); }
           } else { zen_log_at(ERROR, prev_pos, "Expected member name, instead found %s\n", print_token()); }
-          while (token != '}') {
+          while (g_token != '}') {
             eatToken();
           }
           eatToken();
@@ -1314,19 +1405,19 @@ internal StatementAST* _parseStatement() {
   }
 
   /* Variable declaration? */
-  else if (token == TOK_VAR) {
+  else if (g_token == TOK_VAR) {
     eatToken();
-    if (token == TOK_IDENTIFIER) {
+    if (g_token == TOK_IDENTIFIER) {
       VariableDeclarationAST* var;
 
       var = arena_push(&perm_arena, sizeof(VariableDeclarationAST));
       var->stmt.type = VARIABLE_DECLARATION_STMT;
       var->stmt.pos = prev_pos;
-      var->name = arena_push_string(&perm_arena, identifierStr);
+      var->name = arena_push_string(&perm_arena, g_identifier_str);
       eatToken();
 
       /* type? */
-      if (token == ':') {
+      if (g_token == ':') {
         eatToken();
         if (!parseType(&var->type_ast)) {
           zen_log_at(ERROR, prev_pos, "Expected type after ':'\n");
@@ -1335,7 +1426,7 @@ internal StatementAST* _parseStatement() {
       }
 
       /* assignment? */
-      if (token == '=') {
+      if (g_token == '=') {
         eatToken();
         var->value = parseExpression();
       }
@@ -1348,14 +1439,14 @@ internal StatementAST* _parseStatement() {
 
       return &var->stmt;
 
-    } else {zen_log_at(ERROR, prev_pos, "Expected variable name, got token %s", print_token());}
+    } else {zen_log_at(ERROR, prev_pos, "Expected variable name, got g_token %s", print_token());}
   }
 
   else {
     ExpressionAST* expr = parseExpression();
     if (expr) {
       /* assignment? */
-      if (token == '=') {
+      if (g_token == '=') {
         AssignmentAST* ass;
         eatToken();
         ass = arena_push(&perm_arena, sizeof(AssignmentAST));
@@ -1383,19 +1474,19 @@ internal StatementAST* _parseStatement() {
   }
   return 0;
 }
-internal StatementAST* parseStatement() {
+static StatementAST* parseStatement() {
   StatementAST* result;
   while (1) {
-    if (token == EOF) {
+    if (g_token == EOF) {
       return 0;
-    } if (token != ';') {
+    } if (g_token != ';') {
       break;
     }
     eatToken();
   }
   result = _parseStatement();
   while (1) {
-    if (token == EOF || token != ';') {
+    if (g_token == EOF || g_token != ';') {
       break;
     }
     eatToken();
@@ -1406,7 +1497,7 @@ internal StatementAST* parseStatement() {
 
 /** 2nd pass: type inference and scope checks **/
 
-internal Constant* getConstantFromExpression(ExpressionAST* val) {
+static Constant* getConstantFromExpression(ExpressionAST* val) {
   switch (val->expr_type) {
     case LITERAL_EXPR: {
       return (Constant*) val;
@@ -1476,9 +1567,29 @@ internal Constant* getConstantFromExpression(ExpressionAST* val) {
   return 0;
 }
 
-internal void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope);
+static void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope);
 
-internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope, bool recurse_into_structs) {
+static Type* get_pointer_type(Type* base_type) {
+  PointerType* result = 0;
+  Type **it, **end;
+  for (it = array_begin(&generated_types), end = array_end(&generated_types); it < end; ++it) {
+    if ((*it)->type == POINTER_TYPE && ((PointerType*) *it)->base_type == base_type) {
+      result = (PointerType*) *it;
+      break;
+    }
+  }
+
+  if (!result) {
+    result = arena_push(&perm_arena, sizeof(PointerType));
+    result->type.type = POINTER_TYPE;
+    result->base_type = base_type;
+    array_push_val(&generated_types, &result);
+  }
+
+  return &result->type;
+}
+
+static Type* get_type_from_typeast(TypeAST type_ast, CompoundStatementAST* scope, bool recurse_into_structs) {
 
   if (type_ast.num_partial_types == 0) {
     int i;
@@ -1516,7 +1627,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
         subtype_ast.num_partial_types = type_ast.num_partial_types-1;
         subtype_ast.partial_types = type_ast.partial_types+1;
         subtype_ast.name = type_ast.name;
-        base_type = getTypeDeclaration(subtype_ast, scope, true);
+        base_type = get_type_from_typeast(subtype_ast, scope, true);
         if (base_type) {
           StaticArrayType* result = 0;
           Constant* constant = getConstantFromExpression(type_ast.partial_types->static_array.size);
@@ -1546,7 +1657,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
 
             } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Array size must be integer, but got '$t'");}
           } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Array size must be a compile time constant\n");}
-        } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
+        } else {zen_log_at(ERROR, type_ast.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
       } break;
 
       case ARRAY_TYPE_AST: {
@@ -1555,7 +1666,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
         subtype_ast.num_partial_types = type_ast.num_partial_types-1;
         subtype_ast.partial_types = type_ast.partial_types+1;
         subtype_ast.name = type_ast.name;
-        base_type = getTypeDeclaration(subtype_ast, scope, true);
+        base_type = get_type_from_typeast(subtype_ast, scope, true);
         if (base_type) {
           ArrayType* result = 0;
           Type **it, **end;
@@ -1576,35 +1687,20 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
 
           return &result->type;
 
-        } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
+        } else {zen_log_at(ERROR, type_ast.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
       } break;
 
       case POINTER_TYPE_AST: {
         Type* base_type;
-        TypeAST subtype_ast;
+        TypeAST subtype_ast = {0};
         subtype_ast.num_partial_types = type_ast.num_partial_types-1;
         subtype_ast.partial_types = type_ast.partial_types+1;
         subtype_ast.name = type_ast.name;
-        base_type = getTypeDeclaration(subtype_ast, scope, true);
-        if (base_type) {
-          PointerType* result = 0;
-          Type **it, **end;
-          for (it = array_begin(&generated_types), end = array_end(&generated_types); it < end; ++it) {
-            if ((*it)->type == POINTER_TYPE && ((PointerType*) *it)->base_type == base_type) {
-              result = (PointerType*) *it;
-              break;
-            }
-          }
-
-          if (!result) {
-            result = arena_push(&perm_arena, sizeof(PointerType));
-            result->type.type = POINTER_TYPE;
-            result->base_type = base_type;
-            array_push_val(&generated_types, &result);
-          }
-
-          return &result->type;
-        } else {zen_log_at(ERROR, type_ast.partial_types->static_array.size->stmt.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));}
+        base_type = get_type_from_typeast(subtype_ast, scope, true);
+        if (base_type)
+          return get_pointer_type(base_type);
+        else
+          zen_log_at(ERROR, type_ast.pos, "Could not find type %s\n", print_type_ast_name(subtype_ast));
 
         /* create new type if needed */
       } break;
@@ -1614,7 +1710,7 @@ internal Type* getTypeDeclaration(TypeAST type_ast, CompoundStatementAST* scope,
   return 0;
 }
 
-internal DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope) {
+static DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scope) {
   /* TODO: builtin functions? */
   DynArray funs = array_create(2, sizeof(FunctionDeclarationAST*));
   while (scope) {
@@ -1633,10 +1729,10 @@ internal DynArray getFunctionDeclarations(char* name, CompoundStatementAST* scop
   return funs;
 }
 
-internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope);
+static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope);
 
 /* TODO: not int, but size_t */
-internal VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatementAST* scope) {
+static VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStatementAST* scope) {
   while (scope) {
     int i;
     /* check loop implicit variables */
@@ -1677,11 +1773,11 @@ internal VariableDeclarationAST* getVariableDeclaration(char* name, CompoundStat
   return 0;
 }
 
-internal void _evaluateTypeOfStruct(StructType* str, DynArray* parents, CompoundStatementAST* scope) {
+static void _evaluateTypeOfStruct(StructType* str, DynArray* parents, CompoundStatementAST* scope) {
   int i;
   for (i = 0; i < str->num_members; ++i) {
     if (!str->members[i].type) {
-      str->members[i].type = getTypeDeclaration(str->members[i].type_ast, scope, false);
+      str->members[i].type = get_type_from_typeast(str->members[i].type_ast, scope, false);
       if (!str->members[i].type) {
         zen_log_at(ERROR, str->members[i].pos, "Could not find type %s\n", print_type_ast_name(str->members[i].type_ast));
         return;
@@ -1701,26 +1797,26 @@ internal void _evaluateTypeOfStruct(StructType* str, DynArray* parents, Compound
     }
   }
 }
-internal void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope) {
+static void evaluateTypeOfStruct(StructType* str, CompoundStatementAST* scope) {
   DynArray parents = array_create(4, sizeof(char*));
   array_push_val(&parents, &str->name);
   _evaluateTypeOfStruct(str, &parents, scope);
   array_free(&parents);
 }
 
-internal bool hasImplicitConversion(Type* from, Type* to) {
+static bool hasImplicitConversion(Type* from, Type* to) {
   return from->type == STATIC_ARRAY_TYPE && to->type == ARRAY_TYPE;
 }
 
-internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope);
-internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope) {
+static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope);
+static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, CompoundStatementAST* scope) {
   Type* declared_type = 0;
   if (!var || var->type) {
     return;
   }
 
   if (var->type_ast.name) {
-    declared_type = getTypeDeclaration(var->type_ast, scope, true);
+    declared_type = get_type_from_typeast(var->type_ast, scope, true);
     if (!declared_type) {
       zen_log_at(ERROR, var->stmt.pos, "Declared type '%s' for '%s' doesn't exist\n", print_type_ast_name(var->type_ast), var->name);
       var->type = 0;
@@ -1732,7 +1828,6 @@ internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Com
   if (var->value) {
     evaluateTypeOfExpression(var->value, var->type, scope);
     if (!var->value->type) {
-      zen_log_at(ERROR, var->stmt.pos, "Couldn't infer type for %s\n", var->name);
       var->type = 0;
       return;
     }
@@ -1740,7 +1835,6 @@ internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Com
       var->type = var->value->type;
     }
   }
-
 
   /* check that infered expression type and stated type match */
   if (var->value && declared_type && var->value->type != declared_type && !hasImplicitConversion(var->value->type, declared_type)) {
@@ -1752,7 +1846,7 @@ internal void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Com
   return;
 }
 
-internal void evaluateTypeOfFunction(FunctionDeclarationAST* fun, CompoundStatementAST* scope) {
+static void evaluateTypeOfFunction(FunctionDeclarationAST* fun, CompoundStatementAST* scope) {
   int i;
   if (!fun || fun->return_type) {
     return;
@@ -1760,19 +1854,20 @@ internal void evaluateTypeOfFunction(FunctionDeclarationAST* fun, CompoundStatem
   assert(fun->return_type_ast.name); /* return_type should have been set to void */
 
   for (i = 0; i < fun->num_args; ++i) {
-    fun->args[i].type = getTypeDeclaration(fun->args[i].type_ast, scope, true);
+    fun->args[i].type = get_type_from_typeast(fun->args[i].type_ast, scope, true);
     if (!fun->args[i].type) {
       zen_log_at(ERROR, fun->args[i].stmt.pos, "Could not find type '%s'\n", print_type_ast_name(fun->args[i].type_ast));
     }
   }
 
-  fun->return_type = getTypeDeclaration(fun->return_type_ast, scope, true);
+  fun->return_type = get_type_from_typeast(fun->return_type_ast, scope, true);
   if (!fun->return_type) {
     zen_log_at(ERROR, fun->pos, "Could not find definition of return type '%s' of '%s'\n", print_type_ast_name(fun->return_type_ast), fun->name);
   }
 }
 
-internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope) {
+/* Sets expr->type if successful */
+static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope) {
   if (expr->type) {
     return;
   }
@@ -1781,8 +1876,16 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
     case UNKNOWN_EXPR: assert(false); break;
 
     case LITERAL_EXPR: {
-      /* type should have been created by the parser already */
+      /* type should have been created by the parser already using 'builtin_types' */
       if (!expr->type) {LOG_AND_DIE("Something went wrong in the compiler. Please report the bug!\n");}
+    } break;
+
+    case ADDRESSOF_AST: {
+      AddressOfAST* addr = (AddressOfAST*) expr;
+      evaluateTypeOfExpression(addr->base, 0, scope);
+      if (!addr->base->type) goto exit_switch;
+      addr->expr.type = get_pointer_type(addr->base->type);
+      /* TODO: is l_value? */
     } break;
 
     case ARRAY_SUBSCRIPT_EXPR: {
@@ -1869,9 +1972,10 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
     case VARIABLE_GET_EXPR: {
       VariableGetAST* var_ref = (VariableGetAST*) expr;
       VariableDeclarationAST* var = getVariableDeclaration(var_ref->name, scope);
-      if (var) {
+      if (var)
         expr->type = var->type;
-      } else {zen_log_at(ERROR, var_ref->expr.stmt.pos, "Use of undeclared variable '%s'\n", var_ref->name);}
+      else
+        zen_log_at(ERROR, var_ref->expr.stmt.pos, "Use of undeclared variable '%s'\n", var_ref->name);
     } break;
 
     case MEMBER_ACCESS_EXPR: {
@@ -1915,36 +2019,32 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
       if (evidence) {
         if (evidence->type == STRUCT_TYPE) {
           StructType* target = (StructType*) evidence;
-          bool all_match = true;
-          int i;
+          bool name_match;
+          int i,j;
           for (i = 0; i < ast->num_members; ++i) {
-            int j;
             /* TODO: make sure each member is only mentioned once */
-            bool name_match = false;
+            name_match = false;
             for (j = 0; j < target->num_members; ++j) {
               if (strcmp(ast->members[i].name, target->members[j].name) == 0) {
                 name_match = true;
                 ast->members[i].member = target->members + j;
+                break;
               }
             }
             if (!name_match) {
               zen_log_at(ERROR, expr->stmt.pos, "%s has no member %s\n", target->name, ast->members[i].name);
-              all_match = false;
-              break;
+              goto exit_switch;
             }
             assert(ast->members[i].member->type);
             evaluateTypeOfExpression(ast->members[i].value, ast->members[i].member->type, scope);
             if (ast->members[i].value->type != ast->members[i].member->type) {
               zen_log_at(ERROR, expr->stmt.pos, "The member '%s' in '%s' has type '$t', but the expression has type '$t'\n", ast->members[i].member->name, target->name, ast->members[i].member->type, ast->members[i].value->type);
-              all_match = false;
-              break;
+              goto exit_switch;
             }
           }
-          if (all_match) {
-            expr->type = evidence;
-          }
+          expr->type = evidence;
         } else {zen_log_at(ERROR, expr->stmt.pos, "Cannot use struct initialization for non-struct type $t\n", evidence);}
-      } else {zen_log_at(ERROR, expr->stmt.pos, "Not enough type information top evaluate type of struct initialization\n");}
+      } else {zen_log_at(ERROR, expr->stmt.pos, "Not enough type information in context to evaluate type of struct literal\n");}
     } break;
 
     case BINOP_EXPR: {
@@ -1959,10 +2059,11 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
       }
     } break;
   }
+  exit_switch:;
 
   if (evidence && expr->type) {
     /* some implicit conversions.. */
-    if (expr->type->type == STATIC_ARRAY_TYPE && evidence->type == ARRAY_TYPE) {
+    if (expr->type->type == STATIC_ARRAY_TYPE && evidence->type == ARRAY_TYPE && ((ArrayType*)expr->type)->base_type == ((ArrayType*)evidence->type)->base_type) {
       return;
     }
 
@@ -1979,7 +2080,7 @@ internal void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, Comp
   }
 }
 
-internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
+static void doTypeInferenceForScope(CompoundStatementAST* scope) {
   /* TODO: check for duplicates declarations within same scope */
 
   int i;
@@ -1998,8 +2099,6 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
         evaluateTypeOfVariableDeclaration(var, scope);
         if (var->type) {
           zen_log_at(DEBUG_INFO, var->stmt.pos, "Evaluated type of '%s' to '$t'\n", var->name, var->type);
-        } else {
-          zen_log_at(ERROR, var->stmt.pos, "Failed to evaluate type of '%s'\n", var->name);
         }
       } break;
 
@@ -2074,22 +2173,29 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
       case RETURN_STMT: {
         ReturnAST* ret = (ReturnAST*) stmt;
         CompoundStatementAST* scp = scope;
+        FunctionDeclarationAST* fun;
         while (scp) {
-          if (scp->stmt.type == FUNCTION_DECLARATION_STMT) {
-            break;
-          }
+          if (scp->stmt.type == FUNCTION_DECLARATION_STMT) break;
           scp = scp->parent_scope;
         }
 
-        if (scp) {
-          FunctionDeclarationAST* fun = (FunctionDeclarationAST*) scp;
-          evaluateTypeOfExpression(ret->value, fun->return_type, scope);
-          if (ret->value->type) {
-            if (ret->value->type != fun->return_type) {
-              zen_log_at(ERROR, ret->stmt.pos, "Return type $t does not match function return type $t\n", ret->value->type, fun->return_type);
-            }
-          } else {zen_log_at(ERROR, ret->stmt.pos, "Could not infer type of return value\n");};
-        } else {zen_log_at(ERROR, ret->stmt.pos, "Can only use return inside function\n");}
+        if (!scp) {
+          zen_log_at(ERROR, ret->stmt.pos, "Can only use return inside function\n");
+          break;
+        }
+
+        fun = (FunctionDeclarationAST*) scp;
+        evaluateTypeOfExpression(ret->value, fun->return_type, scope);
+
+        if (!ret->value->type) {
+          zen_log_at(ERROR, ret->stmt.pos, "Could not infer type of return value\n");
+          break;
+        }
+        if (ret->value->type != fun->return_type) {
+          zen_log_at(ERROR, ret->stmt.pos, "Return type $t does not match function return type $t\n", ret->value->type, fun->return_type);
+          break;
+        }
+
       } break;
 
       case UNKNOWN_STMT: {
@@ -2102,7 +2208,7 @@ internal void doTypeInferenceForScope(CompoundStatementAST* scope) {
 }
 
 global String _print_buf;
-internal void vprint(FILE* file, char* fmt, va_list args) {
+static void vprint(FILE* file, char* fmt, va_list args) {
   char *p, *str;
   string_clear(&_print_buf);
   string_append(&_print_buf, fmt);
@@ -2125,20 +2231,21 @@ internal void vprint(FILE* file, char* fmt, va_list args) {
               Type* next = 0;
               switch (type->type) {
                 case UNKNOWN_TYPE:
-                case VOID_TYPE: fprintf(file, "void"); break;
-                case INT_TYPE: fprintf(file, "int"); break;
-                case FLOAT_TYPE: fprintf(file, "float"); break;
-                case F32_TYPE: fprintf(file, "f32"); break;
-                case F64_TYPE: fprintf(file, "f64"); break;
-                case U8_TYPE: fprintf(file, "u8"); break;
-                case U16_TYPE: fprintf(file, "u16"); break;
-                case U32_TYPE:  fprintf(file, "u32");break;
-                case U64_TYPE:  fprintf(file, "u64");break;
-                case I8_TYPE: fprintf(file, "i8"); break;
-                case I16_TYPE: fprintf(file, "i16"); break;
-                case I32_TYPE:  fprintf(file, "i32");break;
-                case I64_TYPE:  fprintf(file, "i64");break;
-                case USIZE_TYPE: fprintf(file, "usize"); break;
+                case VOID_TYPE: fprintf(file, "%s", builtin_typenames[VOID_TYPE]); break;
+                case INT_TYPE: fprintf(file, "%s", builtin_typenames[INT_TYPE]); break;
+                case FLOAT_TYPE: fprintf(file, "%s", builtin_typenames[FLOAT_TYPE]); break;
+                case F32_TYPE: fprintf(file, "%s", builtin_typenames[F32_TYPE]); break;
+                case F64_TYPE: fprintf(file, "%s", builtin_typenames[F64_TYPE]); break;
+                case U8_TYPE: fprintf(file, "%s", builtin_typenames[U8_TYPE]); break;
+                case U16_TYPE: fprintf(file, "%s", builtin_typenames[U16_TYPE]); break;
+                case U32_TYPE:  fprintf(file, "%s", builtin_typenames[U32_TYPE]);break;
+                case U64_TYPE:  fprintf(file, "%s", builtin_typenames[U64_TYPE]);break;
+                case I8_TYPE: fprintf(file, "%s", builtin_typenames[I8_TYPE]); break;
+                case I16_TYPE: fprintf(file, "%s", builtin_typenames[I16_TYPE]); break;
+                case I32_TYPE:  fprintf(file, "%s", builtin_typenames[I32_TYPE]);break;
+                case I64_TYPE:  fprintf(file, "%s", builtin_typenames[I64_TYPE]);break;
+                case USIZE_TYPE: fprintf(file, "%s", builtin_typenames[USIZE_TYPE]); break;
+                case STRING_TYPE: fprintf(file, "%s", builtin_typenames[STRING_TYPE]); break;
                 case STRUCT_TYPE: fprintf(file, "%s", ((StructType*) type)->name); break;
                 case ARRAY_TYPE: {
                   fprintf(file, "[]");
@@ -2166,6 +2273,7 @@ internal void vprint(FILE* file, char* fmt, va_list args) {
         }; break;
 
         case 'T': {
+          /* TODO,FIXME: use compile_variable_decl_to_c instead */
           Type* type = va_arg(args, Type*);
           /* ^[20][16]^[8]int -> int *(*(*s)[20][16])[8] */
           if (type->type == POINTER_TYPE) {
@@ -2205,16 +2313,20 @@ internal void vprint(FILE* file, char* fmt, va_list args) {
   }
   vfprintf(file, str, args);
 }
-internal void print(FILE* file, char* fmt, ...) {
+static void print(FILE* file, char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   vprint(file, fmt, args);
   va_end(args);
 }
 
+/** Compile AST to Bytecode **/
+
+/* TODO */
+
 /** Compile AST to C **/
 
-internal void compile_variable_decl_to_c(Type* type, char* name, bool prefix, FILE* file) {
+static void compile_variable_decl_to_c(Type* type, char* name, bool prefix, FILE* file) {
   /* We handle the types, C only needs to know the size of the static allocation */
   /* ^^[32][8]int */
   /* int (*(*name))[32][8] */
@@ -2248,7 +2360,7 @@ internal void compile_variable_decl_to_c(Type* type, char* name, bool prefix, FI
   string_free(&s);
 }
 
-internal void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArray* done) {
+static void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynArray* done) {
   StructType **s, **end;
   int i;
   for (s = array_begin(done), end = array_end(done); s != end; ++s) {
@@ -2283,8 +2395,9 @@ internal void compile_type_to_c(FILE* header, FILE* body, StructType* str, DynAr
   }
 }
 
-internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
+static void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
   switch (expr->expr_type) {
+
     case UNKNOWN_EXPR: assert(false); break;
 
     case LITERAL_EXPR: {
@@ -2303,6 +2416,13 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
         case F64_TYPE: fprintf(body, "%f", ((Constant*) expr)->value.f64); break;
         default: UNREACHABLE; break;
       }
+    } break;
+
+    case ADDRESSOF_AST: {
+      AddressOfAST* ao = (AddressOfAST*) expr;
+      fprintf(body, "&(");
+      compile_expression_to_c(ao->base, body);
+      fprintf(body, ")");
     } break;
 
     case ARRAY_SUBSCRIPT_EXPR: {
@@ -2329,7 +2449,7 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
       if (call->base->expr_type == VARIABLE_GET_EXPR) {
         int i;
         VariableGetAST* base = (VariableGetAST*) call->base;
-        if (call->fun->is_foreign) {
+        if (call->fun->flags & FUN_FOREIGN) {
           fprintf(body, "%s(", base->name);
         }
         else {
@@ -2355,12 +2475,12 @@ internal void compile_expression_to_c(ExpressionAST* expr, FILE* body) {
     } break;
 
     case STRUCT_INIT_EXPR: {
-      zen_log_at(ERROR, expr->stmt.pos, "<internal>: Cannot directly compile a struct initialization\n");
+      zen_log_at(ERROR, expr->stmt.pos, "<static>: Cannot directly compile a struct initialization\n");
     } break;
   }
 }
 
-internal void _get_member_access_chain(String* res, ExpressionAST* expr) {
+static void _get_member_access_chain(String* res, ExpressionAST* expr) {
   if (expr->expr_type == VARIABLE_GET_EXPR) {
     string_append(res, ((VariableGetAST*) expr)->name);
   }
@@ -2371,13 +2491,13 @@ internal void _get_member_access_chain(String* res, ExpressionAST* expr) {
   }
   else {zen_log(DEBUG_ERROR, "Member access is only supported on variables\n"); }
 }
-internal String get_member_access_chain(MemberAccessAST* acc) {
+static String get_member_access_chain(MemberAccessAST* acc) {
   String s = string_create(0);
   _get_member_access_chain(&s, &acc->expr);
   return s;
 }
 
-internal void _compile_struct_init_to_c(String name, StructInitializationAST* init, FILE* file) {
+static void _compile_struct_init_to_c(String name, StructInitializationAST* init, FILE* file) {
   int i;
   for (i = 0; i < init->num_members; ++i) {
     MemberInitializationAST* member = init->members + i;
@@ -2394,7 +2514,7 @@ internal void _compile_struct_init_to_c(String name, StructInitializationAST* in
     string_pop(&name, len+1);
   }
 }
-internal void compile_struct_init_to_c(ExpressionAST* expr, StructInitializationAST* init, FILE* file, bool mangle) {
+static void compile_struct_init_to_c(ExpressionAST* expr, StructInitializationAST* init, FILE* file, bool mangle) {
   /* TODO: check for lvalue */
   if (expr->expr_type == VARIABLE_GET_EXPR) {
     String s = string_create(mangle ? "v_" : "");
@@ -2409,7 +2529,7 @@ internal void compile_struct_init_to_c(ExpressionAST* expr, StructInitialization
   }
 }
 
-internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
+static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
   switch (stmt->type) {
 
     case EXPRESSION_STMT: {
@@ -2573,7 +2693,7 @@ internal void compile_statement_to_c(StatementAST* stmt, FILE* file) {
   }
 }
 
-internal void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
+static void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
   int i;
   fprintf(file, "{");
   for (i = 0; i < block->num_statements; ++i) {
@@ -2585,93 +2705,88 @@ internal void compile_block_to_c(CompoundStatementAST* block, FILE* file) {
 /** Main **/
 
 int main(int argc, char const *argv[]) {
+  CompoundStatementAST* global_scope;
 
 # ifdef DEBUG
   test();
 # endif
 
-
-  if (argc == 1) {
-    zen_log_at(ERROR, prev_pos, "Usage: %s <filename>\n", argv[0]);
-    return 1;
-  }
-  else {
-    next_pos.file = (char*) argv[1];
-    file = fopen(argv[1], "r");
-    if (!file) {
-      zen_log_at(ERROR, prev_pos, "Could not open file %s\n", argv[1]);
-      return 1;
-    }
-  }
+  /* init globals */
+  perm_arena = arena_create();
+  generated_types = array_create(32, sizeof(Type*));
+  _print_buf = string_create(0);
+  void_type_ast.name = "void";
+  builtin_types[1].type = VOID_TYPE;
+  builtin_types[2].type = INT_TYPE;
+  builtin_types[3].type = FLOAT_TYPE;
+  builtin_types[4].type = F32_TYPE;
+  builtin_types[5].type = F64_TYPE;
+  builtin_types[6].type = U8_TYPE;
+  builtin_types[7].type = U16_TYPE;
+  builtin_types[8].type = U32_TYPE;
+  builtin_types[9].type = U64_TYPE;
+  builtin_types[10].type = I8_TYPE;
+  builtin_types[11].type = I16_TYPE;
+  builtin_types[12].type = I32_TYPE;
+  builtin_types[13].type = I64_TYPE;
+  builtin_types[14].type = USIZE_TYPE;
+  builtin_types[STRING_TYPE].type = STRING_TYPE;
+  prev_pos.line = 1;
+  next_pos.line = 1;
 
   /* enable formatting? */
   #ifdef LINUX
     if (isatty(1)) {
-      enableFormatting();
+      enable_formatting();
     }
   #endif
 
-  /* init globals */
+  /* open source file */
+  if (argc == 1) {zen_log_at(ERROR, prev_pos, "Usage: zenc <filename>\n"); return 1;}
   {
-    perm_arena = arena_create();
-    generated_types = array_create(32, sizeof(Type*));
-    _print_buf = string_create(0);
-    _print_buf = string_create(0);
-    void_type_ast.name = "void";
-    builtin_types[1].type = VOID_TYPE;
-    builtin_types[2].type = INT_TYPE;
-    builtin_types[3].type = FLOAT_TYPE;
-    builtin_types[4].type = F32_TYPE;
-    builtin_types[5].type = F64_TYPE;
-    builtin_types[6].type = U8_TYPE;
-    builtin_types[7].type = U16_TYPE;
-    builtin_types[8].type = U32_TYPE;
-    builtin_types[9].type = U64_TYPE;
-    builtin_types[10].type = I8_TYPE;
-    builtin_types[11].type = I16_TYPE;
-    builtin_types[12].type = I32_TYPE;
-    builtin_types[13].type = I64_TYPE;
-    builtin_types[14].type = USIZE_TYPE;
-    prev_pos.line = 1;
-    next_pos.line = 1;
+    int i;
+    for (i = 1; i < argc; ++i) {
+      if (argv[i][0] == '-') {
+        for (++argv[i]; *argv[i]; ++argv[i]) {
+          switch (*argv[i]) {
+            case 'd': g_debug_level = 1;
+          }
+        }
+      }
+    }
+    next_pos.file = (char*) argv[1];
+    g_file = fopen(argv[1], "r");
+    if (!g_file) {zen_log_at(ERROR, prev_pos, "Could not open file %s\n", argv[1]); return 1;}
   }
 
-  /** Parsing **/
-
+  /** Parse-step **/
+  global_scope = arena_push(&perm_arena, sizeof(CompoundStatementAST));
   {
-    CompoundStatementAST* global_scope = arena_push(&perm_arena, sizeof(CompoundStatementAST));
     DynArray statements = array_create(32, sizeof(StatementAST*));
 
     eatToken();
     global_scope->stmt.type = COMPOUND_STMT;
-    
 
-    while (token != TOK_EOF) {
+    while (g_token != TOK_EOF) {
       StatementAST* stmt = parseStatement();
-      if (stmt) {
-        switch (stmt->type) {
-          case FUNCTION_DECLARATION_STMT: {
-            FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
-            fun->body.parent_scope = global_scope;
-            array_push_val(&statements, &stmt);
-            zen_log(DEBUG_INFO, "Adding function definition %s\n", ((FunctionDeclarationAST*) stmt)->name);
-          } break;
-          case VARIABLE_DECLARATION_STMT: {
-            array_push_val(&statements, &stmt);
-            zen_log(DEBUG_INFO, "Adding variable declaration %s with declared type %s\n", ((VariableDeclarationAST*) stmt)->name, print_type_ast_name(((VariableDeclarationAST*) stmt)->type_ast));
-          } break;
-          case STRUCT_DECLARATION_STMT: {
-            array_push_val(&statements, &stmt);
-            zen_log(DEBUG_INFO, "Adding type $t\n", &((StructDeclarationAST*) stmt)->str);
-          } break;
-          default:
-            zen_log_at(ERROR, stmt->pos, "Only variable, struct and function definitions allowed at global scope\n");
-            break;
-        }
-      } else {
-        if (token != TOK_EOF) {
-          return 1;
-        }
+      if (!stmt && g_token != TOK_EOF) return 1;
+
+      switch (stmt->type) {
+        case FUNCTION_DECLARATION_STMT:
+        array_push_val(&statements, &stmt);
+        zen_log(DEBUG_INFO, "Adding function definition %s\n", ((FunctionDeclarationAST*) stmt)->name);
+        break;
+        case VARIABLE_DECLARATION_STMT:
+        array_push_val(&statements, &stmt);
+        zen_log(DEBUG_INFO, "Adding variable declaration %s with declared type %s\n", ((VariableDeclarationAST*) stmt)->name, print_type_ast_name(((VariableDeclarationAST*) stmt)->type_ast));
+        break;
+        case STRUCT_DECLARATION_STMT:
+        array_push_val(&statements, &stmt);
+        zen_log(DEBUG_INFO, "Adding type $t\n", &((StructDeclarationAST*) stmt)->str);
+        break;
+        default:
+        zen_log_at(ERROR, stmt->pos, "Only variable, struct and function definitions allowed at global scope\n");
+        break;
       }
     }
 
@@ -2680,170 +2795,169 @@ int main(int argc, char const *argv[]) {
     array_free(&statements);
 
     if (found_error) {
-      zen_log(ERROR, "Exiting due to previous errors\n");
+      zen_log(ERROR, "Exiting due to errors\n");
       return 1;
-    }
-
-    /** Do type inference and build scope tree **/
-
-    doTypeInferenceForScope(global_scope);
-
-    if (found_error) {
-      zen_log(ERROR, "Exiting due to previous errors\n");
-      return 1;
-    }
-
-    /** Compile to C **/
-
-    {
-      DynArray mains = getFunctionDeclarations("main", global_scope);
-      if (array_count(&mains) == 1) {
-        FunctionDeclarationAST* zen_main = *(FunctionDeclarationAST**) array_get(&mains, 0);
-        if (zen_main->num_args == 0) {
-          /* TODO: check signature of main */
-          FILE* header = tmpfile();
-          FILE* body = tmpfile();
-          FILE* tail = tmpfile();
-          if (body && header && tail) {
-            int i,j;
-
-            /* some builtin types */
-            /* TODO: make to work on all systems */
-            fprintf(header,
-              "#include <stddef.h>\n\n"
-              "#define ARRAY_SIZE(a) (sizeof(a)/sizeof(*a))\n"
-              "typedef char T_i8;\n"
-              "typedef unsigned char T_u8;\n"
-              "typedef short T_i16;\n"
-              "typedef unsigned short T_u16;\n"
-              "typedef int T_i32;\n"
-              "typedef unsigned int T_u32;\n"
-              "typedef long long T_i64;\n"
-              "typedef unsigned long long T_u64;\n"
-              "typedef float T_f32;\n"
-              "typedef double T_f64;\n"
-              "typedef float T_float;\n"
-              "typedef int T_int;\n"
-              "typedef size_t T_usize;\n"
-              "typedef void T_void;\n\n"
-            );
-            fprintf(header,
-              "void* memset( void* dest, int ch, size_t count );\n"
-              "void* memcpy( void* dest, const void* src, size_t count );\n\n"
-              "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
-              "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n"
-            );
-
-            /* compile all structs in global scope */
-            /* TODO: compile all structs and functions in all scopes */
-            {
-              DynArray compiled_structs = array_create(16, sizeof(StructType*));
-
-              /* write types */
-              for (i = 0; i < global_scope->num_statements; ++i) {
-                StatementAST* stmt = global_scope->statements[i];
-                if (stmt->type == STRUCT_DECLARATION_STMT) {
-                  StructType* str = &((StructDeclarationAST*) stmt)->str;
-                  compile_type_to_c(header, body, str, &compiled_structs);
-                }
-              }
-
-              array_free(&compiled_structs);
-              fprintf(header, "\n");
-            }
-
-            /* compile all functions */
-            for (i = 0; i < global_scope->num_statements; ++i) {
-              StatementAST* stmt = global_scope->statements[i];
-              if (stmt->type == FUNCTION_DECLARATION_STMT) {
-                FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
-
-                if (fun->is_foreign) {
-
-                  print(header, "$T %s(", fun->return_type, fun->name);
-
-                  for (j = 0; j < fun->num_args; ++j) {
-                    ArgumentAST* arg = fun->args + j;
-                    print(header, "$T v_%s", arg->type, arg->name);
-                    if (j != fun->num_args - 1) {
-                      fprintf(header, ", ");
-                    }
-                  }
-                  fprintf(header, ");\n");
-
-                }
-
-                else {
-
-                  print(header, "$T $f(", fun->return_type, fun);
-                  print(body, "$T $f(", fun->return_type, fun);
-
-                  for (j = 0; j < fun->num_args; ++j) {
-                    ArgumentAST* arg = fun->args + j;
-                    print(header, "$T v_%s", arg->type, arg->name);
-                    print(body, "$T v_%s", arg->type, arg->name);
-                    if (j != fun->num_args - 1) {
-                      fprintf(header, ", ");
-                      fprintf(body, ", ");
-                    }
-                  }
-                  fprintf(header, ");\n");
-                  fprintf(body, ") ");
-
-                  compile_block_to_c(&fun->body, body);
-                  fprintf(body, "\n");
-                }
-              }
-            }
-
-            /* TODO: check signature of main */
-            print(tail, "int main(int argc, const char* argv[]) {\n\t$f();\n};\n", zen_main);
-            array_free(&mains);
-
-            {
-              char buf[256];
-              FILE* output = fopen("output.c", "w");
-
-              if (output) {
-
-                /* write header */
-                fprintf(output, "\n\n/*** HEADER ***/\n\n");
-                rewind(header);
-                while (1) {
-                  int read = fread(buf, 1, 256, header);
-                  fwrite(buf, read, 1, output);
-                  if (feof(header)) break;
-                }
-                fclose(header);
-
-                /* write body */
-                fprintf(output, "\n\n/*** DEFINITIONS ***/\n\n");
-                rewind(body);
-                while (1) {
-                  int read = fread(buf, 1, 256, body);
-                  fwrite(buf, read, 1, output);
-                  if (feof(body)) break;
-                }
-                fclose(body);
-
-                /* write tail */
-                rewind(tail);
-                while (1) {
-                  int read = fread(buf, 1, 256, tail);
-                  fwrite(buf, read, 1, output);
-                  if (feof(tail)) break;
-                }
-                fclose(tail);
-              } else {
-                zen_log(ERROR, "Could not open output file '/tmp/output.c'\n");
-              }
-
-            }
-          } else {zen_log(ERROR, "Failed to open temp files\n"); }
-        } else {zen_log_at(ERROR, zen_main->body.stmt.pos, "main must not take any arguments");}
-      } else if (array_count(&mains) > 1) {zen_log(ERROR, "Only one main can be defined"); }
-      else {zen_log(ERROR, "No main function declared\n"); }
     }
   }
+
+
+  /** Type inference-step **/
+  doTypeInferenceForScope(global_scope);
+  if (found_error) {
+    zen_log(ERROR, "Exiting due to errors\n");
+    return 1;
+  }
+
+  /** Compile to C **/
+  {
+    DynArray mains = getFunctionDeclarations("main", global_scope);
+    FunctionDeclarationAST* zen_main;
+    FILE *header, *body, *tail, *output;
+    char buf[256];
+    int i,j;
+
+    if (array_count(&mains) == 0) {zen_log(ERROR, "No main function declared\n"); return 1;}
+    if (array_count(&mains) > 1) {zen_log(ERROR, "Only one main can be defined"); return 1;}
+
+    zen_main = *(FunctionDeclarationAST**) array_get(&mains, 0);
+    if (zen_main->num_args != 0) {zen_log_at(ERROR, zen_main->body.stmt.pos, "main must not take any arguments"); return 1;}
+
+    /* TODO: check signature of main */
+    header = tmpfile();
+    body = tmpfile();
+    tail = tmpfile();
+    output = fopen("output.c", "w");
+
+    if (!body || !header || !tail) {zen_log(ERROR, "Failed to open temp files: %s\n", strerror(errno)); return 1;}
+    if (!output) {zen_log(ERROR, "Could not open output file 'output.c': %s\n", strerror(errno)); return 1;}
+
+    /* some builtin types */
+    /* TODO: make to work on all systems */
+    fprintf(header,
+      "#include <stddef.h>\n\n"
+      "#define ARRAY_SIZE(a) (sizeof(a)/sizeof(*a))\n"
+      "typedef char T_i8;\n"
+      "typedef unsigned char T_u8;\n"
+      "typedef short T_i16;\n"
+      "typedef unsigned short T_u16;\n"
+      "typedef int T_i32;\n"
+      "typedef unsigned int T_u32;\n"
+      "typedef long long T_i64;\n"
+      "typedef unsigned long long T_u64;\n"
+      "typedef float T_f32;\n"
+      "typedef double T_f64;\n"
+      "typedef float T_float;\n"
+      "typedef int T_int;\n"
+      "typedef size_t T_usize;\n"
+      "typedef void T_void;\n\n"
+      );
+    fprintf(header,
+      "void* memset( void* dest, int ch, size_t count );\n"
+      "void* memcpy( void* dest, const void* src, size_t count );\n\n"
+      "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
+      "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n"
+      );
+
+      /* compile all structs in global scope */
+      /* TODO: compile all structs and functions in all scopes */
+    {
+      DynArray compiled_structs = array_create(16, sizeof(StructType*));
+
+        /* write types */
+      for (i = 0; i < global_scope->num_statements; ++i) {
+        StatementAST* stmt = global_scope->statements[i];
+        if (stmt->type == STRUCT_DECLARATION_STMT) {
+          StructType* str = &((StructDeclarationAST*) stmt)->str;
+          compile_type_to_c(header, body, str, &compiled_structs);
+        }
+      }
+
+      array_free(&compiled_structs);
+      fprintf(header, "\n");
+    }
+
+      /* compile all functions */
+    for (i = 0; i < global_scope->num_statements; ++i) {
+      StatementAST* stmt = global_scope->statements[i];
+      if (stmt->type == FUNCTION_DECLARATION_STMT) {
+        FunctionDeclarationAST* fun = (FunctionDeclarationAST*) stmt;
+
+        if (fun->flags & FUN_FOREIGN) {
+
+          print(header, "$T %s(", fun->return_type, fun->name);
+
+          for (j = 0; j < fun->num_args; ++j) {
+            ArgumentAST* arg = fun->args + j;
+            print(header, "$T v_%s", arg->type, arg->name);
+            if (j != fun->num_args - 1) {
+              fprintf(header, ", ");
+            }
+          }
+          fprintf(header, ");\n");
+
+        }
+
+        else {
+
+          print(header, "$T $f(", fun->return_type, fun);
+          print(body, "$T $f(", fun->return_type, fun);
+
+          for (j = 0; j < fun->num_args; ++j) {
+            ArgumentAST* arg = fun->args + j;
+            print(header, "$T v_%s", arg->type, arg->name);
+            print(body, "$T v_%s", arg->type, arg->name);
+            if (j != fun->num_args - 1) {
+              fprintf(header, ", ");
+              fprintf(body, ", ");
+            }
+          }
+          fprintf(header, ");\n");
+          fprintf(body, ") ");
+
+          compile_block_to_c(&fun->body, body);
+          fprintf(body, "\n");
+        }
+      }
+    }
+
+      /* TODO: check signature of main */
+    print(tail, "int main(int argc, const char* argv[]) {\n\t$f();\n};\n", zen_main);
+    array_free(&mains);
+
+    /* write header */
+    fprintf(output, "\n\n/*** HEADER ***/\n\n");
+    rewind(header);
+    while (1) {
+      int read = fread(buf, 1, 256, header);
+      fwrite(buf, read, 1, output);
+      if (feof(header)) break;
+    }
+    fclose(header);
+
+      /* write body */
+      fprintf(output, "\n\n/*** DEFINITIONS ***/\n\n");
+    rewind(body);
+    while (1) {
+      int read = fread(buf, 1, 256, body);
+      fwrite(buf, read, 1, output);
+      if (feof(body)) break;
+    }
+    fclose(body);
+
+      /* write tail */
+    rewind(tail);
+    while (1) {
+      int read = fread(buf, 1, 256, tail);
+      fwrite(buf, read, 1, output);
+      if (feof(tail)) break;
+    }
+    fclose(tail);
+
+    if (found_error) {
+      zen_log(ERROR, "Exiting due to errors\n");
+      return 1;
+    }
+  }
+
   return 0;
 }

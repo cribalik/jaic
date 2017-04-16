@@ -1,4 +1,5 @@
 # High
+ * return void
  * don't access variables not yet declared
  * check for structs containing themselves
  * loops with arrays

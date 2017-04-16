@@ -9,9 +9,9 @@ var var5 = fun2(var4, var1)
 var myvec2: vec2
 var mycomp : compound
 var var6 = fun3(myvec2, mycomp)
-var var7: vec2 = {x = 3, y = 5}
-var var8: vec3 = {x = 3, y = 5}
-var var9: compound = {a = {x = 3, y = 5}}
+var var7: vec2 = {x: 3, y: 5}
+var var8: vec3 = {x: 3, y: 5}
+var var9: compound = {a: {x: 3, y: 5}}
 var var10 = overfun(3, 3.0)
 // var7 := vec2{x = 3, y = 5}
 
@@ -25,8 +25,9 @@ fn add(a: int, b: int): int {
 }
 
 // some foreign (C) functions
-fn putchar(a:int) : int #foreign
-fn rand() : int #foreign
+fn putchar(a:int): int #foreign
+fn rand(): int #foreign
+fn printf(fmt: ^i8, ...): int #foreign
 
 // function overloading is OK
 fn overfun(a: vec2) {};
@@ -83,7 +84,7 @@ type Monster {
 fn newRichMonster(): Monster {
   var some_gold = 300
   var more_gold = (2 * 2300) + 300
-  return {gold = some_gold + more_gold*2}
+  return {gold: some_gold + more_gold*2}
 }
 
 // should not compile
@@ -112,8 +113,19 @@ fn main() {
   // this should be allowed for r-value but not for l-value
   // newRichMonster().gold = 3
 
-  var m: Monster = {gold = 3}
+  var m: Monster = {gold: 3}
   putchar(56 + m.gold)
+
+  var str: [5]i8
+  str[0] = 97
+  str[1] = 98
+  str[2] = 99
+  str[3] = 100
+  str[4] = 0
+
+  var pstr: ^i8 = str
+
+  printf(pstr)
 
   var arr: [2][2]int
   arr[0][1] = 1

@@ -17,6 +17,8 @@ typedef struct {
   void* data;
 } DynArray;
 
+#define ARRAY_FOREACH(arr, it, end) for (it = array_begin(arr), end = array_end(end); it != end; ++it)
+
 internal DynArray array_create(int capacity, int item_size) {
   DynArray result;
   result.data = 0;
@@ -110,7 +112,7 @@ internal Array array_to_array(DynArray* arr) {
 }
 
 #ifdef DEBUG
-internal void arrayTest() {
+internal void array_test() {
 
   {
     DynArray a;
