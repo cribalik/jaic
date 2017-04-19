@@ -21,13 +21,13 @@ typedef struct ArenaBlock {
 
 typedef ArenaBlock* MemArena;
 
-internal MemArena arena_create() {
+static MemArena arena_create() {
   MemArena result;
   result = calloc(1, sizeof(ArenaBlock));
   return result;
 }
 
-internal void* arena_push(MemArena* arena, int size) {
+static void* arena_push(MemArena* arena, int size) {
   char* result;
   assert(size <= ARENA_BLOCK_SIZE);
   if ((*arena)->size + size > ARENA_BLOCK_SIZE) {
@@ -45,7 +45,7 @@ internal void* arena_push(MemArena* arena, int size) {
 
 #define arena_pos(arena) ((void*) (arena->data + arena->size))
 
-internal void* arena_pop(MemArena* arena, int size) {
+static void* arena_pop(MemArena* arena, int size) {
   while (1) {
     if (size <= (*arena)->size) {
       (*arena)->size -= size;
@@ -60,7 +60,7 @@ internal void* arena_pop(MemArena* arena, int size) {
   }
 }
 
-internal void arena_pop_to(MemArena* arena, void* to) {
+static void arena_pop_to(MemArena* arena, void* to) {
   char* dest = (char*) to;
   while (1) {
     if ((*arena)->data <= dest && (*arena)->data + (*arena)->size >= dest) {
@@ -75,7 +75,7 @@ internal void arena_pop_to(MemArena* arena, void* to) {
   }
 }
 
-internal void arena_reset(MemArena* arena) {
+static void arena_reset(MemArena* arena) {
   while ((*arena)->prev) {
     ArenaBlock* next = *arena;
     free(*arena);
@@ -84,7 +84,7 @@ internal void arena_reset(MemArena* arena) {
   (*arena)->size = 0;
 }
 
-internal char* arena_push_string(MemArena* arena, char* str) {
+static char* arena_push_string(MemArena* arena, char* str) {
   int len = strlen(str) + 1;
   char* result = arena_push(arena, len);
   memcpy(result, str, len);

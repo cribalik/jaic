@@ -8,16 +8,8 @@
 #include "array.c"
 #include "memarena.c"
 
-#define global static
-#define local_persist static
-#define internal static
-
 /* typedefs */
 typedef char byte;
-typedef char bool;
-typedef int bool32;
-#define true 1
-#define false 0
 
 typedef struct {
   char* file;
