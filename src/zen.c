@@ -1883,27 +1883,29 @@ static void evaluateTypeOfVariableDeclaration(VariableDeclarationAST* var, Compo
   return;
 }
 
-static void evaluateTypeOfFunction(FunctionDeclarationAST* fun, CompoundStatementAST* scope) {
+static int evaluateTypeOfFunction(FunctionDeclarationAST* fun, CompoundStatementAST* scope) {
   int i;
-  if (!fun || fun->return_type) {
-    return;
-  }
+  if (!fun) return 1;
   assert(fun->return_type_ast.name); /* return_type should have been set to void */
 
   for (i = 0; i < fun->num_args; ++i) {
     fun->args[i].type = get_type_from_typeast(fun->args[i].type_ast, scope, 1);
     if (!fun->args[i].type) {
       zen_log_at(ERROR, fun->args[i].stmt.pos, "Could not find type '%s'\n", print_type_ast_name(fun->args[i].type_ast));
+      return 1;
     }
   }
 
   fun->return_type = get_type_from_typeast(fun->return_type_ast, scope, 1);
   if (!fun->return_type) {
     zen_log_at(ERROR, fun->pos, "Could not find definition of return type '%s' of '%s'\n", print_type_ast_name(fun->return_type_ast), fun->name);
+    return 1;
   }
+
+  return 0;
 }
 
-/* Sets expr->type if successful */
+/* Sets expr->type if successful. Else, logs an error (if it doesn't, it's a bug) */
 static void evaluateTypeOfExpression(ExpressionAST* expr, Type* evidence, CompoundStatementAST* scope) {
   if (expr->type) {
     return;
@@ -2787,19 +2789,19 @@ int main(int argc, char const *argv[]) {
       if (!stmt && g_token != TOK_EOF) return 1;
 
       switch (stmt->type) {
-        case FUNCTION_DECLARATION_STMT:
+      case FUNCTION_DECLARATION_STMT:
         array_push_val(&statements, &stmt);
         zen_log(DEBUG_INFO, "Adding function definition %s\n", ((FunctionDeclarationAST*) stmt)->name);
         break;
-        case VARIABLE_DECLARATION_STMT:
+      case VARIABLE_DECLARATION_STMT:
         array_push_val(&statements, &stmt);
         zen_log(DEBUG_INFO, "Adding variable declaration %s with declared type %s\n", ((VariableDeclarationAST*) stmt)->name, print_type_ast_name(((VariableDeclarationAST*) stmt)->type_ast));
         break;
-        case STRUCT_DECLARATION_STMT:
+      case STRUCT_DECLARATION_STMT:
         array_push_val(&statements, &stmt);
         zen_log(DEBUG_INFO, "Adding type $t\n", &((StructDeclarationAST*) stmt)->str);
         break;
-        default:
+      default:
         zen_log_at(ERROR, stmt->pos, "Only variable, struct and function definitions allowed at static scope\n");
         break;
       }
@@ -2839,8 +2841,8 @@ int main(int argc, char const *argv[]) {
 
     /* TODO: check signature of main */
     header = tmpfile();
-    body = tmpfile();
-    tail = tmpfile();
+    body =   tmpfile();
+    tail =   tmpfile();
     output = fopen("output.c", "w");
 
     if (!body || !header || !tail) {zen_log(ERROR, "Failed to open temp files: %s\n", strerror(errno)); return 1;}
@@ -2864,21 +2866,19 @@ int main(int argc, char const *argv[]) {
       "typedef float T_float;\n"
       "typedef int T_int;\n"
       "typedef size_t T_usize;\n"
-      "typedef void T_void;\n\n"
-      );
+      "typedef void T_void;\n\n");
     fprintf(header,
       "void* memset( void* dest, int ch, size_t count );\n"
       "void* memcpy( void* dest, const void* src, size_t count );\n\n"
       "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
-      "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n"
-      );
+      "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n");
 
-      /* compile all structs in static scope */
-      /* TODO: compile all structs and functions in all scopes */
+    /* compile all structs in static scope */
+    /* TODO: compile all structs and functions in all scopes */
     {
       DynArray compiled_structs = array_create(16, sizeof(StructType*));
 
-        /* write types */
+      /* write types */
       for (i = 0; i < global_scope->num_statements; ++i) {
         StatementAST* stmt = global_scope->statements[i];
         if (stmt->type == STRUCT_DECLARATION_STMT) {
@@ -2891,7 +2891,7 @@ int main(int argc, char const *argv[]) {
       fprintf(header, "\n");
     }
 
-      /* compile all functions */
+    /* compile all functions */
     for (i = 0; i < global_scope->num_statements; ++i) {
       StatementAST* stmt = global_scope->statements[i];
       if (stmt->type == FUNCTION_DECLARATION_STMT) {
@@ -2939,7 +2939,9 @@ int main(int argc, char const *argv[]) {
       }
     }
 
-      /* TODO: check signature of main */
+    /* TODO: global variables :O */
+
+    /* TODO: check signature of main */
     print(tail, "int main(int argc, const char* argv[]) {\n\t$f();\n};\n", zen_main);
     array_free(&mains);
 
@@ -2953,8 +2955,8 @@ int main(int argc, char const *argv[]) {
     }
     fclose(header);
 
-      /* write body */
-      fprintf(output, "\n\n/*** DEFINITIONS ***/\n\n");
+    /* write body */
+    fprintf(output, "\n\n/*** DEFINITIONS ***/\n\n");
     rewind(body);
     while (1) {
       int read = fread(buf, 1, 256, body);
@@ -2963,7 +2965,7 @@ int main(int argc, char const *argv[]) {
     }
     fclose(body);
 
-      /* write tail */
+    /* write tail */
     rewind(tail);
     while (1) {
       int read = fread(buf, 1, 256, tail);

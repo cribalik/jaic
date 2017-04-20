@@ -28,11 +28,12 @@ fn putchar(a:int): int #foreign
 fn rand(): int #foreign
 fn printf(fmt: ^i8, ...): int #foreign
 
+
 // function overloading is OK
+var result = overfun(1, 1.0);
 fn overfun(a: vec2) {};
 fn overfun(b: vec3) {};
 fn overfun(a: int, b: float) {};
-var result = overfun(1, 1.0);
 
 var some_identifier = 3;
 // type some_identifier {a:int} // identifiers must be unique, this should error
@@ -129,17 +130,17 @@ fn main() {
   arr[1][0] = 2
   arr[1][1] = 3
 
-  var dynarr: []int = arr[0]
+  var dynarr: []int = arr[1]
 
   for a,i : arr {
-    putchar(56 + i);
+    printf("%i\n", i);
     for b : a {
-      putchar(97 + b) // should print abcd
+      printf("%i\n", b)
     }
   }
 
   for a,i : dynarr {
-    putchar(56 + i);
+    printf("Value is %i\n", a)
   }
 
 }
