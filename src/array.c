@@ -93,7 +93,6 @@ static void array_pop_N(DynArray* arr, int n) {
 static int array_count(DynArray* arr) {
   return arr->count;
 }
-#define arraySize array_count
 
 static void array_free(DynArray* arr) {
   free(arr->data);
