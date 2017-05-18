@@ -274,12 +274,6 @@ static int gettok() {
 
   prev_pos = next_pos;
 
-  /* at */
-  if (curr_char == '@') {
-    curr_char = getChar(g_file);
-    return '@';
-  }
-
   /* identifier */
   if (isalpha(curr_char)) {
     int i = 0;
@@ -2346,7 +2340,6 @@ static void print(FILE* file, char* fmt, ...) {
 /** Compile AST to C **/
 
 static void compile_variable_decl_to_c(Type* type, char* name, int prefix, FILE* file) {
-  /* We handle the types, C only needs to know the size of the static allocation */
   /* ^^[32][8]int */
   /* int (*(*name))[32][8] */
   /* [32]^[64]^int */
@@ -2661,7 +2654,7 @@ static void compile_statement_to_c(StatementAST* stmt, FILE* file) {
           compile_struct_init_to_c(ass->lhs, init, file, 1);
         } else if (ass->rhs->type->type == STATIC_ARRAY_TYPE && ass->lhs->type->type == ARRAY_TYPE) {
           compile_expression_to_c(ass->lhs, file);
-          fprintf(file, " = static_array_into_array(");
+          fprintf(file, " = create_array(");
           compile_expression_to_c(ass->rhs, file);
           /* TODO: size_t */
           fprintf(file, ", %i);", ((StaticArrayType*) ass->rhs->type)->size);
@@ -2871,7 +2864,7 @@ int main(int argc, char const *argv[]) {
       "void* memset( void* dest, int ch, size_t count );\n"
       "void* memcpy( void* dest, const void* src, size_t count );\n\n"
       "typedef struct Slice {size_t length; void* data;} Slice;\n\n"
-      "static inline Slice static_array_into_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n");
+      "static inline Slice create_array(void* data, int length) {Slice s; s.data = data; s.length = length; return s;}\n\n");
 
     /* compile all structs in static scope */
     /* TODO: compile all structs and functions in all scopes */
@@ -2947,30 +2940,25 @@ int main(int argc, char const *argv[]) {
 
     /* write header */
     fprintf(output, "\n\n/*** HEADER ***/\n\n");
-    rewind(header);
-    while (1) {
+    for (rewind(header); !feof(header) && !ferror(header);) {
       int read = fread(buf, 1, 256, header);
       fwrite(buf, read, 1, output);
-      if (feof(header)) break;
     }
     fclose(header);
 
     /* write body */
     fprintf(output, "\n\n/*** DEFINITIONS ***/\n\n");
-    rewind(body);
-    while (1) {
+    for (rewind(body); !feof(body) && !ferror(body);) {
       int read = fread(buf, 1, 256, body);
       fwrite(buf, read, 1, output);
-      if (feof(body)) break;
     }
     fclose(body);
 
     /* write tail */
     rewind(tail);
-    while (1) {
+    for (rewind(tail); !feof(tail) && !ferror(tail);) {
       int read = fread(buf, 1, 256, tail);
       fwrite(buf, read, 1, output);
-      if (feof(tail)) break;
     }
     fclose(tail);
 
