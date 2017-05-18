@@ -1,50 +1,81 @@
 # High
+ * run arbitrary code in compiler (either as a vm running bytecode, or compiling and dynamically loading code as it is compiled)
  * global variables
  * return void
- * don't access variables not yet declared
- * check for structs containing themselves
- * loops with arrays
- * pointers
- * differentiate between expressions that yield temporary, in-place values (struct initializers, binary operators, calls), and expressions that point to something on stack or in memory (variables and member variables of variables)
+ * don't allow access of variables not yet declared
+ * differentiate between lvalues and rvalues
  * operator precedence
- * Type identifier for struct initializer
- * Multiple return values
+ * Type identifier for struct literal
+ * multiple return values
+ * builtin (already defined) return value
+ * defer keyword
  * (strongly and loosly typed) enums
  * (auto-breaking! :D) case (switch) statement
- * arrays of <enum> size
  * default function parameters
  * UFC
  * parse negative values
+ * allow _ in number literals
  * function pointers
- * any type
+ * Any type
+ * polymorphic functions
+ * "using" keyword
+ * multiple files
+ * compile in multiple steps (linking'n'stuff)
 
 # Low
- * send in arguments to main
+ * namespaces
  * check if all code paths have return statements
  * check for duplicate function overloads
  * check for unused variables
- * `getPositionOfPlayer().x = 3` should only work for pointers?
  * check for conflicting declarations in same scope
- * No inheritence - always use composition because it scales better. As far as I can see the bonuses of inheritence (disregarding runtime polymorphism, which I'm not sure we will have) are:
-    1. if player derives from position, you can just write `player.x`, instead of `player.position.x`. nice!
-    2. you get automatic conversion to the parent type: `offsetPosition(player, x=1)`
-    3. if you know a pointer to a type is really a pointer to the subtype, you can safely cast it to the subtype: `player := cast(pos, Player)`
-    4. your subtype has the same member functions as the parent: `player.offset(x=1)`
 
-  Basically, all of these features come down to implicit casting to parent type in different situations (even in point 4, since we don't have members functions but use UFC instead). If you want these features, why not have a member of this type, and annotate it to allow implicit casting with a keyword like C++ `using`?
-  This makes it a lot easier to see what the type is made of, especially if we have multiple members of the same type
+# Motivations
+ * No exceptions
+   Exceptions are almost ubiquitous nowadays.. So much so that many new programmers don't know how people even handled exceptions without them in old languages before they were invented before they existed.
+   Let me get one thing straight. Except for hard runtime errors like null pointer derenfences, and dividing by zero, there are no such thing as an exception. There are only conditions. Either a procedure did the side effect that you wanted it to do or it didn't. Either the function you called gives you a valid value back that you can use or it doesn't. And if you want to write robust, well behaving programs, then this is how you should approach them. Do you agree? I hope so. If we agree on that, then maybe we can agree that functions should make as explicit as possible if they can succeed or fail. Now one way of doing this is how they did in java: you annotate the function with the different kinds of exceptions that can be thrown, and every function that directly or indirectly calls that function needs to catch those errors, or you get a compile time error. This approach I actually like - a calling program should handle whatever can go wrong, and it should be explicitly. Unfortunately, and every Java programmer can attest to this, it is a pain in the a-hole. Sometimes you just don't care and what happens is you just put a giant try-catch clause around the whole thing. The best thing would be if you make explicit what can go wrong, but you still allow users to ignore errors. I am certain there are a lot of good ways to do this, but in terms of simplicity i think Go does it right. Return an error code, and allow multiple return values.
+   ```
+   var result, error = do_something()
+   if (error) return error
+   // use result...
+
+   result, error = do_something_else()
+   error switch {
+     do_something_else.FILE_NOT_FOUND: print("Could not find file") return error
+     do_something_else.NO_PERMISSION: print("No permission") return error
+     0: break
+   }
+   // use result...
+   ```
+ * Inheritance vs Composition
+   You should always prefer composition over inheritence. Composition
+    1. Is clearer - alleviating the constant confusion of "is this a method that belongs to this class, or to any of the parent classes? If so, should this not also call the super classes implementation as well? I have to look up the parent class to make sure ... oh OK now that I've read almost the entire parent class, I see that it didn't require that we call it. Good. Now.. what was I doing..?"
+    2. Scales better than multiple inheritance. Having multiple fields having the same type requires less mental strain then both inheriting a class and having a field with that class
+    3. Provides better encapsulation. Inheritence breaks encapsulation.
+    4. Allows you to better code against interface and not implementation. Using inheritence often opens up the parent classes internals allowing the subclass to code against the implementation and not the interface of the superclass. Even though programmers should know not to do this, you can bet it still happens all the frickin time.
+    5. Allows you to change dependencies at runtime with dependency injection, instead of hardcoding in a parent class implementation.
+    6. Multiple inheritence.. just no. Even if your language supports it, it saves you so much headache just using composition instead. Don't believe me? Try it yourself!
+   Now inheritence doesn't come without some conforts, or else people wouldn't be using it.
+   As far as I can see the bonuses of inheritence (disregarding runtime polymorphism, which I'm not sure we will have) are:
+    1. if for example player derives from position, you can just write `player.x`, instead of `player.position.x`. nice!
+    2. you get automatic conversion to the parent type when passing it as a function parameter: `offsetPosition(player, x=1)`
+    3. if you know a pointer to a type is really a pointer to the subtype, you can safely cast it to the subtype (without having to do some pointer magic with `offsetof`) and get a compiler error if this inheritence does not exist: `var player = cast(position, Player)`
+    4. your subtype has all same member functions as the parent, except for those that you want to override: `player.offset(x=1)`
+   We of course want the best from both worlds: the encapsulation of composition but the comforts of inheritence. Is there a way to do it? I believe so!
+   Basically, all of these features come down to implicit casting to parent type in different situations (even in point 4, since we don't have members functions but use UFC instead). If you want these features, why not have a field with this type (composition), and annotate it to allow implicit casting? We could use a keyword like the C++ `using`?
+   For example:
+
   ```
   Player := type {
     using Position pos // the main position of player
     Position pet_position // the position of its pet
 
     using Color color // main color of player
-    Color hat_color // color of players hat, regardless of players collor
+    Color hat_color // color of players hat, regardless of players color
   }
 
-  player: Player
+  var player: Player
   player.pet_position.offset(y=2)
-  player.offset(x=1)
+  player.offset(x=1) // With UFC this calls the function `offset(p: Position, x: int, y: int)`. The using keyword allows the player to automatically be downcast to a position by selecting the field with the `using` keyword
   player.hat_color.lighten(10) // make the hat color a bit lighter
-  player.darken(10) // make player a bit darker
+  player.darken(10) // make player a bit darker. Again, the player's color field is sent to the darken function
   ```
