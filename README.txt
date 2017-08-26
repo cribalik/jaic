@@ -1,1 +1,1 @@
-A very zen programming language
+A very zen programming language compiler
