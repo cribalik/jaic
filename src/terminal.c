@@ -10,6 +10,7 @@ static char* BOLD = "";
 static char* UNBOLD = "";
 static char* RESET_FORMAT = "";
 static char* RESET_COLOR = "";
+static char* RESET = "";
 
 static void enable_formatting() {
   RED = "\x1B[31m";
@@ -20,6 +21,7 @@ static void enable_formatting() {
   UNBOLD = "\x1B[21m";
   RESET_FORMAT = "\x1B[0m";
   RESET_COLOR = "\x1B[39m";
+  RESET = "\x1B[0m\x1B[39m";
 }
 
 #endif /* JAIC_TERMINAL */
