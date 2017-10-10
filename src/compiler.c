@@ -748,6 +748,8 @@ static Node* parse_block() {
     }
 
     *stmt = parse_statement();
+    if (!*stmt)
+      continue;
     stmt = &(*stmt)->head.next;
   }
 
@@ -758,8 +760,10 @@ static Node* parse_statement() {
   Node *n;
   if (global.token == TOKEN_EOF)
     return 0;
-  if (global.token == ';')
+  if (global.token == ';') {
+    token_next();
     return 0;
+  }
 
   n = node_alloc();
 
@@ -1364,14 +1368,12 @@ static void do_parse_step() {
   token_next();
 
   while (1) {
-    /* skip empty statements */
-    while (global.token == ';')
-      token_next();
-
     if (global.token == TOKEN_EOF)
       break;
 
     *stmt = parse_statement();
+    if (!*stmt)
+      continue;
 
     #if 0
     switch ((*stmt)->head.type) {
