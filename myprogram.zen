@@ -1,156 +1,20 @@
-fn printf(fmt: ^i8, ...): int #foreign
-var var3: int = 3;
-fn add() {
-  var maps = 3;
-  3+5;
-}
-fn fun3(a:vec2, b:compound): vec2 { fun2(0.5, a.x); }
-var v: []int;
-// some variables
-var var1 = (3+5)+5;
-var var2 = var1;
-var var4: float = 3.01+5.0;
-var var5 = fun2(var4, var1);
-var myvec2: vec2;
-var mycomp : compound;
-var var6 = fun3(myvec2, mycomp);
-var var7: vec2 = vec2(x: 3, y: 5);
-var var8 = vec3(x: 3, y: 5);
-var var9: compound = compound(a: vec2(x: 3, y: 5));
-var var10 = overfun(3, 3.0);
-// var7 := vec2(x: 3, y: 5)
+fn main() {
+  var m: Monster;
+  m.gold = 3;
+  m.health = 10;
+  m.weapon.damage = 20;
+  m.weapon.durability = 30;
 
-// some functions
-fn fun2(a:float, b:int): int {} // should give error
-fn fun4() {}
-fn add(a: int, b: int): int {
-  []int(1,2,3);
-  []Tuple(int)(1,2,3,4);
-  var maps = []HashMap(int, string)(1,2);
-  return a + b;
+  print(m.gold, m.health, m.weapon.damage, m.weapon.durability);
 }
 
-fn putchar() {
-
-}
-
-// some foreign (C) functions
-fn putchar(a:int): int #foreign
-fn rand(): int #foreign
-
-
-// function overloading is OK
-var result = overfun(1, 1.0);
-fn overfun(a: vec2) {};
-fn overfun(b: vec3) {};
-fn overfun(a: int, b: float) {};
-
-var some_identifier = 3;
-// type some_identifier {a:int} // identifiers must be unique, this should error
-
-// some structs
-type compound {
-  a: vec2;
-  b: vec3;
-}
-
-type compound2 {
-  a:int;
-  b:int;
-}
-
-type vec3 {
-  x: int;
-  y: int;
-  z: int;
-}
-
-type vec2 {
-  x: int;
-  y: int;
-}
-
-// some nested structs
-type B {
-  v: vec2;
-  // a: A // will cause error because A will contain itself
-}
-
-type A {
-  b: B;
-}
-
-type Weapon {
+struct Weapon {
   damage: int;
   durability: int;
 }
 
-type Monster {
+struct Monster {
   gold: int;
   health: int;
   weapon: Weapon;
-}
-
-fn newRichMonster(): Monster {
-  var some_gold = 300;
-  var more_gold = (2 * 2300) + 300;
-  return Monster(gold: some_gold + more_gold*2);
-}
-
-// should not compile
-/*
-fn should_not_compile() : int {
-  // variable not declared!
-  putchar(a)
-  a := 3
-
-  // recursive type
-  /*
-  type A {
-    b: B
-  }
-  type B {
-    a: A
-  }
-  */
-
-  // no return value!
-}
-*/
-
-fn main() {
-
-  // this should be allowed for r-value but not for l-value
-  // newRichMonster().gold = 3
-
-  var m: Monster;
-  putchar(56 + m.gold);
-
-  var str: []i8;
-  str[0] = 97;
-  str[1] = 98;
-  str[2] = 99;
-  str[3] = 100;
-  str[4] = 0;
-
-  printf("hello %s %i %f", "hej", 7, 0.13);
-
-  var arr: [2][2]int;
-  arr[0][1] = 1;
-  arr[1][0] = 2;
-  arr[1][1] = 3;
-
-  var dynarr: ^[]int = arr[1];
-
-  for a,i : arr {
-    printf("%i\n", i);
-    for b : a {
-      printf("%i\n", b);
-    }
-  }
-
-  for a,i : dynarr {
-    printf("Value is %i\n", a);
-  }
-
 }

@@ -1,0 +1,7 @@
+fn Main
+{
+	out r
+	mv r 0
+	push 3
+	call Printi
+}

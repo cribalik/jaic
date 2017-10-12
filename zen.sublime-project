@@ -9,7 +9,7 @@
   [
     {
       "name": "zenc",
-      "shell_cmd": "gcc -ansi -pedantic -g -Wall -Wextra -Wno-unused-function -DLINUX ${project_path}/src/compiler.c -o ${project_path}/build/zenc",
+      "shell_cmd": "${project_path}/build.sh",
       "file_regex": "^([^ ][^:]+):([0-9]+):?([0-9]+)?:? (.*)$",
       "working_dir": ".",
       "selector": "source.c"
@@ -20,6 +20,13 @@
       "file_regex":  "^([^ ][^:]+):([0-9]+):?([0-9]+)?:? (.*)$",
       "working_dir": ".",
       "selector": "source.zen"
+    },
+    {
+      "name": "zasm",
+      "shell_cmd": "cd ${project_path}/build; ${project_path}/build/zasm ${file}",
+      "file_regex":  "^([^ ][^:]+):([0-9]+):?([0-9]+)?:? (.*)$",
+      "working_dir": ".",
+      "selector": "source.zasm"
     } 
   ]
 }
