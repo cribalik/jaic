@@ -297,7 +297,7 @@ MEM__CALL int block_init(Block *block, void *mem, long num_items, long item_size
   int err;
 
   if (item_size < (long)sizeof(void*))
-    return mem_errno = MEM_INVALID_ARG;
+    item_size = (long)sizeof(void*);
   block->item_size = item_size;
   block->next = 0;
 

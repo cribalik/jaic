@@ -1,6 +1,7 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -11,6 +12,39 @@
 #ifdef LINUX
   #include <unistd.h>
 #endif
+
+#define STATIC_ASSERT(expr, name) typedef char static_assert_##name[expr?1:-1]
+
+#ifdef _MSC_VER
+  typedef __int8 i8;
+  typedef __int16 i16;
+  typedef __int32 i32;
+  typedef __int64 i64;
+  typedef unsigned __int8 u8;
+  typedef unsigned __int16 u16;
+  typedef unsigned __int32 u32;
+  typedef unsigned __int64 u64;
+#else
+  /* let's hope stdint has us covered */
+  #include <stdint.h>
+  typedef int8_t i8;
+  typedef int16_t i16;
+  typedef int32_t i32;
+  typedef int64_t i64;
+  typedef uint8_t u8;
+  typedef uint16_t u16;
+  typedef uint32_t u32;
+  typedef uint64_t u64;
+#endif
+
+STATIC_ASSERT(sizeof(i8) == 1, i8_is_1_byte);
+STATIC_ASSERT(sizeof(i16) == 2, i16_is_2_bytes);
+STATIC_ASSERT(sizeof(i32) == 4, i32_is_4_bytes);
+STATIC_ASSERT(sizeof(i64) == 8, i64_is_8_bytes);
+STATIC_ASSERT(sizeof(u8) == 1, u8_is_1_byte);
+STATIC_ASSERT(sizeof(u16) == 2, u16_is_2_bytes);
+STATIC_ASSERT(sizeof(u32) == 4, u32_is_4_bytes);
+STATIC_ASSERT(sizeof(u64) == 8, u64_is_8_bytes);
 
 static void die(const char* fmt, ...) {
   va_list args;

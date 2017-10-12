@@ -1,3 +1,16 @@
+fn Sub
+{
+	out r
+	param a
+	param b
+	var c
+	var d
+	mv a c
+	mv b d
+	sub c d
+	mv r c
+}
+
 fn Main
 {
 	out r

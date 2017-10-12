@@ -547,6 +547,9 @@ static void token_next() {
 
     /* integer */
     if (*parser.tok_cursor != '.') {
+      if (isalpha(*parser.tok_cursor) || *parser.tok_cursor == '_')
+        parse_error("Invalid token\n");
+
       tmp = *parser.tok_cursor;
       *parser.tok_cursor = '\0';
       parser.tok_integer = atoi(parser.tok_start);
@@ -566,6 +569,9 @@ static void token_next() {
       ++parser.tok_cursor;
 
     /* TODO: check for suffixes here e.g. 30.0f */
+    if (isalpha(*parser.tok_cursor) || *parser.tok_cursor == '_')
+      parse_error("Invalid token\n");
+
     tmp = *parser.tok_cursor;
     *parser.tok_cursor = '\0';
     parser.tok_float = strtod(parser.tok_start, 0);
@@ -733,7 +739,7 @@ static Node* parse_statement() {
     n->retur.value = parse_expression();
 
     if (parser.token != ';')
-      parse_error("Expected ';' after return statement\n");
+      parse_error("Expected ';' after return statement, but got %s\n", token_as_string());
     token_next();
     return n;
 
@@ -934,7 +940,7 @@ static Node* parse_statement() {
   }
 
   if (parser.token != ';')
-    parse_error("Expected ';' after expression\n");
+    parse_error("Expected ';' after expression, but got %s\n", token_as_string());
   token_next();
   /* just an expression */
   return n;
