@@ -6,12 +6,7 @@
 
 typedef enum {
   TOKEN_NULL = 0,
-  TOKEN_MV = INSTR_MV,
-  TOKEN_SUBI = INSTR_SUBI,
-  TOKEN_SUBF = INSTR_SUBF,
-  TOKEN_PUSH = INSTR_PUSH,
-  TOKEN_CALL = INSTR_CALL,
-  TOKEN_ECALL = INSTR_ECALL,
+
   TOKEN_IDENTIFIER,
   TOKEN_INT,
   TOKEN_FLOAT,
@@ -23,8 +18,6 @@ typedef enum {
   TOKEN_EOF,
   TOKEN_OUT,
   TOKEN_VAR,
-  TOKEN_I64,
-  TOKEN_F64,
 
   TOKEN_COUNT
 } Token;
@@ -39,7 +32,7 @@ typedef struct Symbol {
 
 typedef struct Variable {
   Token vartype;
-  RegisterType type;
+  DataType type;
   String name;
 } Variable;
 
@@ -154,26 +147,10 @@ static void token_next() {
       assembler.token = TOKEN_FN;
     else if (token_identifier_eq("out"))
       assembler.token = TOKEN_OUT;
-    else if (token_identifier_eq("mv"))
-      assembler.token = INSTR_MV;
     else if (token_identifier_eq("var"))
       assembler.token = TOKEN_VAR;
-    else if (token_identifier_eq("i64"))
-      assembler.token = TOKEN_I64;
-    else if (token_identifier_eq("f64"))
-      assembler.token = TOKEN_F64;
-    else if (token_identifier_eq("push"))
-      assembler.token = INSTR_PUSH;
-    else if (token_identifier_eq("subi"))
-      assembler.token = INSTR_SUBI;
-    else if (token_identifier_eq("subf"))
-      assembler.token = INSTR_SUBF;
     else if (token_identifier_eq("param"))
       assembler.token = TOKEN_ARG;
-    else if (token_identifier_eq("call"))
-      assembler.token = INSTR_CALL;
-    else if (token_identifier_eq("ecall"))
-      assembler.token = INSTR_ECALL;
     else
       assembler.token = TOKEN_IDENTIFIER;
   }
@@ -307,16 +284,16 @@ static void newline() {
     token_next();
 }
 
-static int is_type() {
-  return assembler.token == TOKEN_I64 || assembler.token == TOKEN_F64;
-}
+static DataType get_type() {
+  int i;
 
-static RegisterType get_type() {
-  switch (assembler.token) {
-    case TOKEN_I64: return TYPE_I64;
-    case TOKEN_F64: return TYPE_F64;
-    default: return 0;
-  }
+  if (assembler.token != TOKEN_IDENTIFIER)
+    assemble_error("Expected type, but got %s\n", token_name());
+
+  for (i = 0; i < ARRAY_LEN(datatype_names); ++i)
+    if (streqc(assembler.tok_identifier, datatype_names[i]))
+      return i;
+  return DATATYPE_NULL;
 }
 
 static void add_variable() {
@@ -327,7 +304,7 @@ static void add_variable() {
   /* type */
   token_next();
   var.type = get_type();
-  if (!var.type)
+  if (var.type <= DATATYPE_NULL || var.type >= DATATYPE_NUM || var.type == DATATYPE_STACK)
     assemble_error("Expected type, but got %s\n", token_name());
 
   /* name */
@@ -376,9 +353,20 @@ static void add_symbol() {
   token_next();
 }
 
+static Instruction get_instruction() {
+  int i;
+
+  if (assembler.token != TOKEN_IDENTIFIER)
+    assemble_error("Expected instruction, but got %s\n", token_name());
+  for (i = 0; i < ARRAY_LEN(instruction_names); ++i)
+    if (streqc(assembler.tok_identifier, instruction_names[i]))
+      return i;
+  return INSTR_NULL;
+}
+
 static void add_location(int dest) {
   if (assembler.token == TOKEN_IDENTIFIER) {
-    array_push(assembler.program, TYPE_STACK);
+    array_push(assembler.program, DATATYPE_STACK);
     add_val(i64, get_variable_offset(assembler.tok_identifier));
     goto done;
   }
@@ -386,11 +374,11 @@ static void add_location(int dest) {
     assemble_error("Only integers can be used as destination\n");
 
   if (assembler.token == TOKEN_INT) {
-    array_push(assembler.program, TYPE_I64);
+    array_push(assembler.program, DATATYPE_I64);
     add_val(i64, assembler.tok_integer);
   }
   else if (assembler.token == TOKEN_FLOAT) {
-    array_push(assembler.program, TYPE_F64);
+    array_push(assembler.program, DATATYPE_F64);
     add_val(f64, assembler.tok_float);
   }
 
@@ -430,61 +418,67 @@ static void assemble() {
 
       while (1) {
         switch (assembler.token) {
-        case TOKEN_MV:
-          add_instruction(INSTR_MV);
-          add_location(1);
-          add_location(0);
-          break;
 
-        case TOKEN_SUBI:
-          add_instruction(INSTR_SUBI);
-          add_location(1);
-          add_location(0);
-          break;
+          case TOKEN_IDENTIFIER: {
+            switch (get_instruction(assembler.token)) {
+              case INSTR_NUM:
+              case INSTR_NULL:
+                assemble_error("Unrecognized command %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+              case INSTR_MV:
+                add_instruction(INSTR_MV);
+                add_location(1);
+                add_location(0);
+                break;
 
-        case TOKEN_SUBF:
-          add_instruction(INSTR_SUBF);
-          add_location(1);
-          add_location(0);
-          break;
+              case INSTR_SUBI:
+                add_instruction(INSTR_SUBI);
+                add_location(1);
+                add_location(0);
+                break;
 
-        case TOKEN_PUSH:
-          add_instruction(INSTR_PUSH);
-          add_location(0);
-          break;
+              case INSTR_SUBF:
+                add_instruction(INSTR_SUBF);
+                add_location(1);
+                add_location(0);
+                break;
 
-        case TOKEN_CALL:
-          add_instruction(INSTR_CALL);
-          add_symbol();
-          break;
+              case INSTR_PUSH:
+                add_instruction(INSTR_PUSH);
+                add_location(0);
+                break;
 
-        case TOKEN_ECALL: {
-          int i;
+              case INSTR_CALL:
+                add_instruction(INSTR_CALL);
+                add_symbol();
+                break;
 
-          add_instruction(INSTR_ECALL);
+              case INSTR_ECALL: {
+                int i;
 
-          for (i = 0; i < ARRAY_LEN(host_api); ++i) {
-            if (streq(host_api[i].name, assembler.tok_identifier))
-              break;
+                add_instruction(INSTR_ECALL);
+
+                for (i = 0; i < ARRAY_LEN(host_api); ++i)
+                  if (streq(host_api[i].name, assembler.tok_identifier))
+                    break;
+                if (i == ARRAY_LEN(host_api))
+                  assemble_error("Unknown host api function %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+                add_val(u64, host_api[i].id);
+                token_next();
+                break;
+              }
+
+            }
+            break;
           }
-          if (i == ARRAY_LEN(host_api))
-            assemble_error("Unknown host api function %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
-          add_val(u64, host_api[i].id);
-          token_next();
 
-          break;
+          case TOKEN_RBRACE:
+            token_next();
+            goto fn_done;
+
+          default:
+            assemble_error("Expected command, but got %s\n", token_name());
         }
 
-        case TOKEN_RBRACE:
-          token_next();
-          goto fn_done;
-
-        case TOKEN_IDENTIFIER:
-          assemble_error("Unrecognized command %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
-
-        default:
-          assemble_error("Expected command, but got %s\n", token_name());
-        }
         newline();
       }
 
@@ -524,25 +518,17 @@ static void assembler_init(const char *filename) {
   assembler.tok_cursor = assembler.tok_start = assembler.file.data;
 
   token_names[TOKEN_NULL]       = "<unknown>";
-  token_names[TOKEN_MV]         = "mv";
-  token_names[TOKEN_SUBI]       = "subi";
-  token_names[TOKEN_SUBF]       = "subf";
-  token_names[TOKEN_PUSH]       = "push";
-  token_names[TOKEN_CALL]       = "call";
-  token_names[TOKEN_ECALL]      = "ecall";
   token_names[TOKEN_IDENTIFIER] = "<identifier>";
   token_names[TOKEN_INT]        = "<int>";
   token_names[TOKEN_FLOAT]      = "<float>";
   token_names[TOKEN_FN]         = "fn";
-  token_names[TOKEN_EOL]        = "\n";
+  token_names[TOKEN_EOL]        = "<eol>";
   token_names[TOKEN_ARG]        = "param";
   token_names[TOKEN_LBRACE]     = "{";
   token_names[TOKEN_RBRACE]     = "}";
   token_names[TOKEN_EOF]        = "<eof>";
   token_names[TOKEN_OUT]        = "out";
   token_names[TOKEN_VAR]        = "var";
-  token_names[TOKEN_I64]        = "i64";
-  token_names[TOKEN_F64]        = "f64";
   for (i = 0; i < TOKEN_COUNT; ++i)
     if (!token_names[i])
       assemble_error("Token name %i not defined\n", i);

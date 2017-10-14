@@ -174,25 +174,50 @@ static int streq(String a, String b) {
 }
 
 static int streqc(String a, const char *b) {
-  return (int)strlen(b) == a.len && !memcmp(a.str, b, a.len);
+  return a.str && b && (int)strlen(b) == a.len && !memcmp(a.str, b, a.len);
 }
 
-typedef enum RegisterType {
-  TYPE_NULL = 0,
-  TYPE_I64,
-  TYPE_F64,
-  TYPE_STACK
-} RegisterType;
+typedef enum DataType {
+  DATATYPE_NULL = 0,
+
+  DATATYPE_I64,
+  DATATYPE_F64,
+  DATATYPE_STACK,
+
+  DATATYPE_NUM
+} DataType;
+
+static const char *datatype_names[] = {
+  0,
+  "i64",
+  "f64",
+  0
+};
+STATIC_ASSERT(ARRAY_LEN(datatype_names) == DATATYPE_NUM, all_datatypes_named);
 
 typedef enum Instruction {
   INSTR_NULL = 0,
+
   INSTR_MV,
   INSTR_SUBI,
   INSTR_SUBF,
   INSTR_PUSH,
   INSTR_CALL,
-  INSTR_ECALL
+  INSTR_ECALL,
+
+  INSTR_NUM
 } Instruction;
+
+static const char *instruction_names[] = {
+  0,
+  "mv",
+  "subi",
+  "subf",
+  "push",
+  "call",
+  "ecall"
+};
+STATIC_ASSERT(ARRAY_LEN(instruction_names) == INSTR_NUM, all_instructions_named);
 
 typedef union Register Register;
 union Register {

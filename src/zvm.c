@@ -25,19 +25,20 @@ Instruction get_instr() {
   return *vm.instr++;
 }
 
-RegisterType get_regtype() {
+DataType get_regtype() {
   return *vm.instr++;
 }
 
 Register* get_loc() {
-  RegisterType t = get_regtype();
+  DataType t = get_regtype();
   vm.instr += sizeof(Register);
   switch (t) {
-  case TYPE_NULL: vm_error("Got null instruction\n");
-  case TYPE_I64:
-  case TYPE_F64:
+  case DATATYPE_NUM:
+  case DATATYPE_NULL: vm_error("Got null instruction\n");
+  case DATATYPE_I64:
+  case DATATYPE_F64:
     return ((Register*)vm.instr)-1;
-  case TYPE_STACK:
+  case DATATYPE_STACK:
     return vm.stack - (((Register*)vm.instr)-1)->i64;
   }
   return 0;
