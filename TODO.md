@@ -31,7 +31,7 @@
 
 # Motivations
  * No exceptions
-   Exceptions are almost ubiquitous nowadays.. So much so that many new programmers don't know how people even handled exceptions without them in old languages before they were invented before they existed.
+   Exceptions are almost ubiquitous nowadays.. So much so that many new programmers don't know how people even handled exceptions without them in old languages before they were invented.
    Let me get one thing straight. Except for hard runtime errors like null pointer derenfences, and dividing by zero, there are no such thing as an exception. There are only conditions. Either a procedure did the side effect that you wanted it to do or it didn't. Either the function you called gives you a valid value back that you can use or it doesn't. And if you want to write robust, well behaving programs, then this is how you should approach them. Do you agree? I hope so. If we agree on that, then maybe we can agree that functions should make as explicit as possible if they can succeed or fail. Now one way of doing this is how they did in java: you annotate the function with the different kinds of exceptions that can be thrown, and every function that directly or indirectly calls that function needs to catch those errors, or you get a compile time error. This approach I actually like - a calling program should handle whatever can go wrong, and it should be explicitly. Unfortunately, and every Java programmer can attest to this, it is a pain in the a-hole. Sometimes you just don't care and what happens is you just put a giant try-catch clause around the whole thing. The best thing would be if you make explicit what can go wrong, but you still allow users to ignore errors. I am certain there are a lot of good ways to do this, but in terms of simplicity i think Go does it right. Return an error code, and allow multiple return values.
    ```
    var result, error = do_something()
@@ -39,7 +39,7 @@
    // use result...
 
    result, error = do_something_else()
-   error switch {
+   switch error {
      do_something_else.FILE_NOT_FOUND: print("Could not find file") return error
      do_something_else.NO_PERMISSION: print("No permission") return error
      0: break
@@ -49,13 +49,13 @@
  * Inheritance vs Composition
    You should always prefer composition over inheritence. Composition
     1. Is clearer - alleviating the constant confusion of "is this a method that belongs to this class, or to any of the parent classes? If so, should this not also call the super classes implementation as well? I have to look up the parent class to make sure ... oh OK now that I've read almost the entire parent class, I see that it didn't require that we call it. Good. Now.. what was I doing..?"
-    2. Scales better than multiple inheritance. Having multiple fields having the same type requires less mental strain then both inheriting a class and having a field with that class
+    2. Scales better than multiple inheritance. Having multiple fields having the same type requires less mental strain than both inheriting a class and having a field with that class
     3. Provides better encapsulation. Inheritence breaks encapsulation.
     4. Allows you to better code against interface and not implementation. Using inheritence often opens up the parent classes internals allowing the subclass to code against the implementation and not the interface of the superclass. Even though programmers should know not to do this, you can bet it still happens all the frickin time.
     5. Allows you to change dependencies at runtime with dependency injection, instead of hardcoding in a parent class implementation.
     6. Multiple inheritence.. just no. Even if your language supports it, it saves you so much headache just using composition instead. Don't believe me? Try it yourself!
    Now inheritence doesn't come without some conforts, or else people wouldn't be using it.
-   As far as I can see the bonuses of inheritence (disregarding runtime polymorphism, which I'm not sure we will have) are:
+   As far as I can see the bonuses of inheritence (disregarding runtime polymorphism, which can be replaced by lambdas) are:
     1. if for example player derives from position, you can just write `player.x`, instead of `player.position.x`. nice!
     2. you get automatic conversion to the parent type when passing it as a function parameter: `offsetPosition(player, x=1)`
     3. if you know a pointer to a type is really a pointer to the subtype, you can safely cast it to the subtype (without having to do some pointer magic with `offsetof`) and get a compiler error if this inheritence does not exist: `var player = cast(position, Player)`

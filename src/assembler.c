@@ -4,37 +4,17 @@
 #include "mem.h"
 #include <ctype.h>
 
-typedef union Register Register;
-union Register {
-  i8  i8;
-  i16 i16;
-  i32 i32;
-  i64 i64;
-  u8  u8;
-  u16 u16;
-  u32 u32;
-  u64 u64;
-  float f32;
-  double f64;
-  u64 ptr;
-};
-
-typedef char Instruction;
-
-typedef enum RegisterType {
-  TYPE_I64,
-  TYPE_F64,
-  TYPE_STACK
-} RegisterType;
-
 typedef enum {
-  INSTR_MV = 1,
-  INSTR_SUB,
-  INSTR_PUSH,
-  INSTR_CALL,
-  TOKEN_IDENTIFIER = 5,
-  TOKEN_INT = 6,
-  TOKEN_FLOAT = 7,
+  TOKEN_NULL = 0,
+  TOKEN_MV = INSTR_MV,
+  TOKEN_SUBI = INSTR_SUBI,
+  TOKEN_SUBF = INSTR_SUBF,
+  TOKEN_PUSH = INSTR_PUSH,
+  TOKEN_CALL = INSTR_CALL,
+  TOKEN_ECALL = INSTR_ECALL,
+  TOKEN_IDENTIFIER,
+  TOKEN_INT,
+  TOKEN_FLOAT,
   TOKEN_FN,
   TOKEN_EOL,
   TOKEN_ARG,
@@ -42,40 +22,25 @@ typedef enum {
   TOKEN_RBRACE,
   TOKEN_EOF,
   TOKEN_OUT,
-  TOKEN_VAR
+  TOKEN_VAR,
+  TOKEN_I64,
+  TOKEN_F64,
+
+  TOKEN_COUNT
 } Token;
 
-const char *token_names[] = {
-  "<unknown>",
-  "mv",
-  "sub",
-  "push",
-  "call",
-  "<identifier>"
-  "<int>",
-  "<float>",
-  "fn",
-  "\n",
-  "param",
-  "{",
-  "}",
-  "<eof>",
-  "out",
-  "var",
-};
-
+const char *token_names[TOKEN_COUNT];
 typedef struct AssemblerState AssemblerState;
 
 typedef struct Symbol {
-  char *name;
-  int name_len;
+  String name;
   int address;
 } Symbol;
 
 typedef struct Variable {
-  Token type;
-  char *name;
-  int name_len;
+  Token vartype;
+  RegisterType type;
+  String name;
 } Variable;
 
 struct AssemblerState {
@@ -92,8 +57,7 @@ struct AssemblerState {
 
   char *tok_cursor, *tok_start;
   Token token;
-  char *tok_identifier;
-  int tok_identifier_len;
+  String tok_identifier;
   long tok_integer;
   double tok_float;
 };
@@ -119,12 +83,12 @@ static void assemble_error(const char *fmt, ...) {
 static char* identifier_alloc() {
   char *s;
 
-  if (assembler.tok_identifier_len > assembler.identifier_mem.block_size)
-    assemble_error("Identifier length (%i) exeeded limit (%i)\n", assembler.tok_identifier_len, assembler.identifier_mem.block_size);
+  if (assembler.tok_identifier.len > assembler.identifier_mem.block_size)
+    assemble_error("Identifier length (%i) exeeded limit (%i)\n", assembler.tok_identifier.len, assembler.identifier_mem.block_size);
 
-  s = lstack_push_ex(&assembler.identifier_mem, assembler.tok_identifier_len+1, 1);
-  memcpy(s, assembler.tok_identifier, assembler.tok_identifier_len);
-  s[assembler.tok_identifier_len] = 0;
+  s = lstack_push_ex(&assembler.identifier_mem, assembler.tok_identifier.len+1, 1);
+  memcpy(s, assembler.tok_identifier.str, assembler.tok_identifier.len);
+  s[assembler.tok_identifier.len] = 0;
   return s;
 }
 
@@ -143,9 +107,7 @@ static void parse_error(const char *fmt, ...) {
 }
 
 static int token_identifier_eq(const char *str) {
-  if ((int)strlen(str) != assembler.tok_identifier_len)
-    return 0;
-  return !memcmp(assembler.tok_identifier, str, assembler.tok_identifier_len);
+  return streqc(assembler.tok_identifier, str);
 }
 
 static void token_next() {
@@ -186,8 +148,8 @@ static void token_next() {
     while (isalpha(*c) || isdigit(*c) || *c=='_')
       ++c;
 
-    assembler.tok_identifier = assembler.tok_start;
-    assembler.tok_identifier_len = c - assembler.tok_start;
+    assembler.tok_identifier.str = assembler.tok_start;
+    assembler.tok_identifier.len = c - assembler.tok_start;
     if (token_identifier_eq("fn"))
       assembler.token = TOKEN_FN;
     else if (token_identifier_eq("out"))
@@ -196,14 +158,22 @@ static void token_next() {
       assembler.token = INSTR_MV;
     else if (token_identifier_eq("var"))
       assembler.token = TOKEN_VAR;
+    else if (token_identifier_eq("i64"))
+      assembler.token = TOKEN_I64;
+    else if (token_identifier_eq("f64"))
+      assembler.token = TOKEN_F64;
     else if (token_identifier_eq("push"))
       assembler.token = INSTR_PUSH;
-    else if (token_identifier_eq("sub"))
-      assembler.token = INSTR_SUB;
+    else if (token_identifier_eq("subi"))
+      assembler.token = INSTR_SUBI;
+    else if (token_identifier_eq("subf"))
+      assembler.token = INSTR_SUBF;
     else if (token_identifier_eq("param"))
       assembler.token = TOKEN_ARG;
     else if (token_identifier_eq("call"))
       assembler.token = INSTR_CALL;
+    else if (token_identifier_eq("ecall"))
+      assembler.token = INSTR_ECALL;
     else
       assembler.token = TOKEN_IDENTIFIER;
   }
@@ -263,19 +233,17 @@ static int address() {
   return array_len(assembler.program);
 }
 
-static Symbol* find_symbol(char *name, int name_len) {
+static Symbol* find_symbol(String name) {
   Symbol *s;
 
-  array_find(assembler.symbols, s, 
-    name_len == s->name_len && memcmp(name, s->name, s->name_len) == 0);
+  array_find(assembler.symbols, s, streq(s->name, name));
   return s;
 }
 
-static Variable* find_variable(char *name, int name_len) {
+static Variable* find_variable(String name) {
   Variable *v;
 
-  array_find(assembler.variables, v,
-    name_len == v->name_len && memcmp(name, v->name, v->name_len) == 0);
+  array_find(assembler.variables, v, streq(v->name, name));
   return v;
 }
 
@@ -284,14 +252,28 @@ static void save_symbol() {
   Symbol s;
 
   /* check if symbol already exists */
-  sp = find_symbol(assembler.tok_identifier, assembler.tok_identifier_len);
+  sp = find_symbol(assembler.tok_identifier);
   if (sp) {
+    int i;
+    int old_addr;
+    /* resolve the places we used it */
+
+    if (sp->address >= 0)
+      assemble_error("%.*s defined multiple times\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+    old_addr = sp->address;
     sp->address = address();
+
+    for (i = 0; i < array_len(assembler.unresolved); ++i) {
+      if (assembler.unresolved[i] != old_addr)
+        continue;
+      ((Register*)&assembler.program[assembler.unresolved[i]])->i64 = sp->address;
+      array_remove_fast(assembler.unresolved, i);
+      --i;
+    }
     return;
   }
 
   s.name = assembler.tok_identifier;
-  s.name_len = assembler.tok_identifier_len;
   s.address = address();
   array_push(assembler.symbols, s);
 }
@@ -299,14 +281,13 @@ static void save_symbol() {
 static int symbol_address() {
   Symbol *s;
 
-  s = find_symbol(assembler.tok_identifier, assembler.tok_identifier_len);
+  s = find_symbol(assembler.tok_identifier);
   /* if symbol doesn't exist, create a new symbol with negative address */
   if (!s) {
     static int invalid_address;
     Symbol new_sym;
 
     new_sym.name = assembler.tok_identifier;
-    new_sym.name_len = assembler.tok_identifier_len;
     new_sym.address = --invalid_address;
 
     array_push(assembler.symbols, new_sym);
@@ -326,44 +307,62 @@ static void newline() {
     token_next();
 }
 
+static int is_type() {
+  return assembler.token == TOKEN_I64 || assembler.token == TOKEN_F64;
+}
+
+static RegisterType get_type() {
+  switch (assembler.token) {
+    case TOKEN_I64: return TYPE_I64;
+    case TOKEN_F64: return TYPE_F64;
+    default: return 0;
+  }
+}
+
 static void add_variable() {
   Variable var;
 
-  var.type = assembler.token;
+  var.vartype = assembler.token;
 
+  /* type */
+  token_next();
+  var.type = get_type();
+  if (!var.type)
+    assemble_error("Expected type, but got %s\n", token_name());
+
+  /* name */
   token_next();
   if (assembler.token != TOKEN_IDENTIFIER)
     assemble_error("Expected output name, but got %s\n", token_name());
 
   /* add variable */
   /* check that variable doesn't already exists */
-  if (find_variable(assembler.tok_identifier, assembler.tok_identifier_len))
-    assemble_error("Multiple definition of %.*s\n", assembler.tok_identifier, assembler.tok_identifier_len);
+  if (find_variable(assembler.tok_identifier))
+    assemble_error("Multiple definition of %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
   var.name = assembler.tok_identifier;
-  var.name_len = assembler.tok_identifier_len;
   array_push(assembler.variables, var);
   token_next();
 
   newline();
 }
 
-static void add_instruction() {
-  array_push(assembler.program, assembler.token);
+static void add_instruction(Instruction instr) {
+  array_push(assembler.program, instr);
   token_next();
 }
 
 #define add_val(type, val) (((Register*)array_push_n(assembler.program, (int)sizeof(Register)))->type = val)
 
-static int get_variable_offset(char *name, int name_len) {
+static int get_variable_offset(String name) {
   Variable *var;
   int offset;
 
-  var = find_variable(name, name_len);
+  var = find_variable(name);
   if (!var)
-    assemble_error("Unknown variable %.*s\n", name_len, name);
+    assemble_error("Unknown variable %.*s\n", name.len, name.str);
 
   offset = array_len(assembler.variables) - (var - assembler.variables);
-  if (var->type != TOKEN_VAR)
+  if (var->vartype != TOKEN_VAR)
     ++offset;
 
   return offset;
@@ -377,12 +376,16 @@ static void add_symbol() {
   token_next();
 }
 
-static void add_location() {
+static void add_location(int dest) {
   if (assembler.token == TOKEN_IDENTIFIER) {
     array_push(assembler.program, TYPE_STACK);
-    add_val(i64, get_variable_offset(assembler.tok_identifier, assembler.tok_identifier_len));
+    add_val(i64, get_variable_offset(assembler.tok_identifier));
+    goto done;
   }
-  else if (assembler.token == TOKEN_INT) {
+  if (dest)
+    assemble_error("Only integers can be used as destination\n");
+
+  if (assembler.token == TOKEN_INT) {
     array_push(assembler.program, TYPE_I64);
     add_val(i64, assembler.tok_integer);
   }
@@ -390,6 +393,8 @@ static void add_location() {
     array_push(assembler.program, TYPE_F64);
     add_val(f64, assembler.tok_float);
   }
+
+  done:
   token_next();
 }
 
@@ -425,34 +430,60 @@ static void assemble() {
 
       while (1) {
         switch (assembler.token) {
-        case INSTR_MV:
-          add_instruction();
-          add_location();
-          add_location();
+        case TOKEN_MV:
+          add_instruction(INSTR_MV);
+          add_location(1);
+          add_location(0);
           break;
 
-        case INSTR_SUB:
-          add_instruction();
-          add_location();
-          add_location();
+        case TOKEN_SUBI:
+          add_instruction(INSTR_SUBI);
+          add_location(1);
+          add_location(0);
           break;
 
-        case INSTR_PUSH:
-          add_instruction();
-          add_location();
+        case TOKEN_SUBF:
+          add_instruction(INSTR_SUBF);
+          add_location(1);
+          add_location(0);
           break;
 
-        case INSTR_CALL:
-          add_instruction();
+        case TOKEN_PUSH:
+          add_instruction(INSTR_PUSH);
+          add_location(0);
+          break;
+
+        case TOKEN_CALL:
+          add_instruction(INSTR_CALL);
           add_symbol();
           break;
+
+        case TOKEN_ECALL: {
+          int i;
+
+          add_instruction(INSTR_ECALL);
+
+          for (i = 0; i < ARRAY_LEN(host_api); ++i) {
+            if (streq(host_api[i].name, assembler.tok_identifier))
+              break;
+          }
+          if (i == ARRAY_LEN(host_api))
+            assemble_error("Unknown host api function %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+          add_val(u64, host_api[i].id);
+          token_next();
+
+          break;
+        }
 
         case TOKEN_RBRACE:
           token_next();
           goto fn_done;
 
+        case TOKEN_IDENTIFIER:
+          assemble_error("Unrecognized command %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+
         default:
-          assemble_error("Invalid token %s\n", token_name());
+          assemble_error("Expected command, but got %s\n", token_name());
         }
         newline();
       }
@@ -467,6 +498,13 @@ static void assemble() {
   }
 
   assemble_done:
+
+  {
+    Symbol *s;
+    array_foreach(assembler.symbols, s)
+      if (s->address < 0)
+        assemble_error("%.*s not defined\n", s->name.len, s->name.str);
+  }
   {
     FILE *f;
     f = fopen("output.zbin", "wb");
@@ -476,13 +514,38 @@ static void assemble() {
       assemble_error("Failed to write to output: %s\n", strerror(errno));
     fclose(f);
   }
-  /* TODO: resolve symbols */
 }
 
 static void assembler_init(const char *filename) {
+  int i;
+
   filecache_init(&assembler.file_cache);
   assembler.file = *file_get(&assembler.file_cache, filename);
   assembler.tok_cursor = assembler.tok_start = assembler.file.data;
+
+  token_names[TOKEN_NULL]       = "<unknown>";
+  token_names[TOKEN_MV]         = "mv";
+  token_names[TOKEN_SUBI]       = "subi";
+  token_names[TOKEN_SUBF]       = "subf";
+  token_names[TOKEN_PUSH]       = "push";
+  token_names[TOKEN_CALL]       = "call";
+  token_names[TOKEN_ECALL]      = "ecall";
+  token_names[TOKEN_IDENTIFIER] = "<identifier>";
+  token_names[TOKEN_INT]        = "<int>";
+  token_names[TOKEN_FLOAT]      = "<float>";
+  token_names[TOKEN_FN]         = "fn";
+  token_names[TOKEN_EOL]        = "\n";
+  token_names[TOKEN_ARG]        = "param";
+  token_names[TOKEN_LBRACE]     = "{";
+  token_names[TOKEN_RBRACE]     = "}";
+  token_names[TOKEN_EOF]        = "<eof>";
+  token_names[TOKEN_OUT]        = "out";
+  token_names[TOKEN_VAR]        = "var";
+  token_names[TOKEN_I64]        = "i64";
+  token_names[TOKEN_F64]        = "f64";
+  for (i = 0; i < TOKEN_COUNT; ++i)
+    if (!token_names[i])
+      assemble_error("Token name %i not defined\n", i);
 }
 
 int main(int argc, const char **argv) {

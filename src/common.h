@@ -14,6 +14,7 @@
 #endif
 
 #define STATIC_ASSERT(expr, name) typedef char static_assert_##name[expr?1:-1]
+#define ARRAY_LEN(a) (int)(sizeof(a)/sizeof(*(a)))
 
 #ifdef _MSC_VER
   typedef __int8 i8;
@@ -163,6 +164,54 @@ static void filepos_print(FileCache *cache, FilePos file_pos, const char *prefix
   fprintf(stderr, "^\n");
 }
 
+typedef struct String {
+  const char *str;
+  int len;
+} String;
+
+static int streq(String a, String b) {
+  return a.len == b.len && !memcmp(a.str, b.str, a.len);
+}
+
+static int streqc(String a, const char *b) {
+  return (int)strlen(b) == a.len && !memcmp(a.str, b, a.len);
+}
+
+typedef enum RegisterType {
+  TYPE_NULL = 0,
+  TYPE_I64,
+  TYPE_F64,
+  TYPE_STACK
+} RegisterType;
+
+typedef enum Instruction {
+  INSTR_NULL = 0,
+  INSTR_MV,
+  INSTR_SUBI,
+  INSTR_SUBF,
+  INSTR_PUSH,
+  INSTR_CALL,
+  INSTR_ECALL
+} Instruction;
+
+typedef union Register Register;
+union Register {
+  i8  i8;
+  i16 i16;
+  i32 i32;
+  i64 i64;
+  u8  u8;
+  u16 u16;
+  u32 u32;
+  u64 u64;
+  float f32;
+  double f64;
+  u64 ptr;
+};
+
+static struct {String name; int id;} host_api[] = {
+  {{"print", 5}, 1}
+};
 
 static File file_open(const char *filename) {
   File result = {0};

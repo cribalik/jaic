@@ -1,20 +1,20 @@
 fn Sub
 {
-	out r
-	param a
-	param b
-	var c
-	var d
+	out i64 r
+	param i64 a
+	param i64 b
+	var i64 c
+	var i64 d
 	mv a c
 	mv b d
-	sub c d
+	subi c d
 	mv r c
 }
 
 fn Main
 {
-	out r
+	out i64 r
 	mv r 0
 	push 3
-	call Printi
+	ecall print
 }
