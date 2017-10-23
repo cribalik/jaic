@@ -5,6 +5,9 @@
 
 
 # Philosophies
+
+..todo..
+
 ## No exceptions
 Exceptions are almost ubiquitous nowadays. So much so that many new programmers don't know how people even handled errors in older languages before they were invented (it certainly wasn't anything we learned in school).
 Let us be clear on one thing. Except for hard runtime errors like null pointer dereferences and dividing by zero, there is no such thing as an exception. There are only conditions. Either a procedure did the side effect that you wanted it to do or it didn't. Either the function/service you called/used gives you a valid value back that you can use or it doesn't. And if you want to write robust, well behaving programs, then I assert that this is a good and robust way to think about errors. If we can agree on that, then maybe we can agree that functions should make as explicit as possible if they can succeed or fail. Now one way of doing this is how they did in java: you annotate the function with the different kinds of exceptions that can be thrown, and every function that directly or indirectly calls that function needs to catch those errors, or you get a compile time error. This approach I actually like - a calling program should handle whatever can go wrong, and it should be explicitly. Unfortunately, and every Java programmer can attest to this, it is a pain in the a-hole. Sometimes you just don't care and what happens is you just put a giant try-catch clause around the whole thing. The best thing would be if you make explicit what types of things can go wrong, but you still allow users to ignore errors. I am certain there are a lot of good ways to do this, but in terms of simplicity i think Go does it right. Return an error code, and allow multiple return values. And maybe have some kind of syntax for defining enums for the different kind of errors a function can return
