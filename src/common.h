@@ -202,8 +202,11 @@ typedef enum Instruction {
   INSTR_SUBI,
   INSTR_SUBF,
   INSTR_PUSH,
+  INSTR_POP,
   INSTR_CALL,
   INSTR_ECALL,
+  INSTR_RET,
+  INSTR_EXIT,
 
   INSTR_NUM
 } Instruction;
@@ -214,8 +217,11 @@ static const char *instruction_names[] = {
   "subi",
   "subf",
   "push",
+  "pop",
   "call",
-  "ecall"
+  "ecall",
+  "ret",
+  "exit"
 };
 STATIC_ASSERT(ARRAY_LEN(instruction_names) == INSTR_NUM, all_instructions_named);
 
@@ -234,9 +240,19 @@ union Register {
   u64 ptr;
 };
 
-static struct {String name; int id;} host_api[] = {
-  {{"print", 5}, 1}
+typedef enum VMFun {
+  VMFUN_NULL,
+
+  VMFUN_PRINT,
+
+  VMFUN_NUM
+} VMFun;
+
+static const char *vmfun_names[] = {
+  0,
+  "print"
 };
+STATIC_ASSERT(ARRAY_LEN(vmfun_names) == VMFUN_NUM, all_vmfuns_named);
 
 static File file_open(const char *filename) {
   File result = {0};

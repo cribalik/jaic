@@ -290,10 +290,26 @@ static DataType get_type() {
   if (assembler.token != TOKEN_IDENTIFIER)
     assemble_error("Expected type, but got %s\n", token_name());
 
-  for (i = 0; i < ARRAY_LEN(datatype_names); ++i)
+  for (i = 1; i < ARRAY_LEN(datatype_names); ++i)
     if (streqc(assembler.tok_identifier, datatype_names[i]))
       return i;
-  return DATATYPE_NULL;
+
+  assemble_error("Unknown type %s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+  return 0;
+}
+
+static VMFun get_vmfun() {
+  int i;
+
+  if (assembler.token != TOKEN_IDENTIFIER)
+    assemble_error("Expected vm function, but got %s\n", token_name());
+
+  for (i = 1; i < ARRAY_LEN(vmfun_names); ++i)
+    if (streqc(assembler.tok_identifier, vmfun_names[i]))
+      return i;
+
+  assemble_error("Uknown host function %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+  return 0;
 }
 
 static void add_variable() {
@@ -304,7 +320,7 @@ static void add_variable() {
   /* type */
   token_next();
   var.type = get_type();
-  if (var.type <= DATATYPE_NULL || var.type >= DATATYPE_NUM || var.type == DATATYPE_STACK)
+  if (var.type == DATATYPE_STACK)
     assemble_error("Expected type, but got %s\n", token_name());
 
   /* name */
@@ -388,6 +404,7 @@ static void add_location(int dest) {
 
 static void assemble() {
   token_next();
+
   while (1) {
     /* resolve tags */
     switch (assembler.token) {
@@ -395,10 +412,23 @@ static void assemble() {
       goto assemble_done;
 
     case TOKEN_FN: {
+      int is_main = 0;
+      int num_variables = 0;
+
       token_next();
       if (assembler.token != TOKEN_IDENTIFIER)
         assemble_error("Expected identifier after fn, but got %s\n", token_name());
+
+      /* main? */
+      if (streqc(assembler.tok_identifier, "Main")) {
+        if (((Register*)assembler.program)->u64)
+          assemble_error("Multiple declarations of Main\n");
+        ((Register*)assembler.program)->u64 = array_len(assembler.program);
+        is_main = 1;
+      }
+
       save_symbol();
+
       token_next();
 
       newline();
@@ -414,7 +444,7 @@ static void assemble() {
       while (assembler.token == TOKEN_ARG)
         add_variable();
       while (assembler.token == TOKEN_VAR)
-        add_variable();
+        add_variable(), ++num_variables;
 
       while (1) {
         switch (assembler.token) {
@@ -447,32 +477,44 @@ static void assemble() {
                 add_location(0);
                 break;
 
+              case INSTR_POP:
+                add_instruction(INSTR_POP);
+                add_location(0);
+                break;
+
               case INSTR_CALL:
                 add_instruction(INSTR_CALL);
                 add_symbol();
                 break;
 
               case INSTR_ECALL: {
-                int i;
+                VMFun f;
 
                 add_instruction(INSTR_ECALL);
-
-                for (i = 0; i < ARRAY_LEN(host_api); ++i)
-                  if (streq(host_api[i].name, assembler.tok_identifier))
-                    break;
-                if (i == ARRAY_LEN(host_api))
-                  assemble_error("Unknown host api function %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
-                add_val(u64, host_api[i].id);
+                f = get_vmfun();
+                add_val(u64, f);
                 token_next();
                 break;
               }
+
+              case INSTR_RET:
+                add_instruction(INSTR_RET);
+                add_val(u64, num_variables);
+                break;
+
+              case INSTR_EXIT:
+                add_instruction(INSTR_EXIT);
+                break;
 
             }
             break;
           }
 
           case TOKEN_RBRACE:
-            token_next();
+            if (is_main)
+              add_instruction(INSTR_EXIT);
+            else
+              add_instruction(INSTR_RET);
             goto fn_done;
 
           default:
@@ -532,6 +574,8 @@ static void assembler_init(const char *filename) {
   for (i = 0; i < TOKEN_COUNT; ++i)
     if (!token_names[i])
       assemble_error("Token name %i not defined\n", i);
+
+  add_val(u64, 0);
 }
 
 int main(int argc, const char **argv) {

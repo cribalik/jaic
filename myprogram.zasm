@@ -1,3 +1,14 @@
+fn Main
+{
+	out i64 r
+	mv r 0
+	push 3
+	ecall print
+	push 6
+	ecall print
+	pop 2
+}
+
 fn Sub
 {
 	out i64 r
@@ -9,12 +20,4 @@ fn Sub
 	mv b d
 	subi c d
 	mv r c
-}
-
-fn Main
-{
-	out i64 r
-	mv r 0
-	push 3
-	ecall print
 }
