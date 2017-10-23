@@ -1,3 +1,9 @@
+A very zen language
+
+
+
+
+
 # Philosophies
 ## No exceptions
 Exceptions are almost ubiquitous nowadays.. So much so that many new programmers don't know how people even handled exceptions without them in old languages before they were invented.
