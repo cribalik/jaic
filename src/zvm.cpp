@@ -1,5 +1,5 @@
 #include "common.h"
-#include "array.h"
+#include "array.hpp"
 
 static void vm_error(const char *fmt, ...) {
   va_list args;
@@ -23,11 +23,11 @@ static VMState vm;
 
 
 Instruction get_instr() {
-  return *vm.instr++;
+  return (Instruction)*vm.instr++;
 }
 
 DataType get_regtype() {
-  return *vm.instr++;
+  return (DataType)*vm.instr++;
 }
 
 Register* get_reg() {
@@ -47,18 +47,18 @@ Register* get_loc() {
   case DATATYPE_F64:
     return get_reg();
   case DATATYPE_STACK:
-    return vm.stack - get_reg()->i64;
+    return vm.stack - get_reg()->int64;
   }
   return 0;
 }
 
 unsigned char* get_addr() {
-  return vm.program_start + get_reg()->u64;
+  return vm.program_start + get_reg()->uint64;
 }
 
 typedef void (*VMFunPtr)(void);
 static void vm_print() {
-  printf("%i\n", (int)vm.stack[-1].i64);
+  printf("%i\n", (int)vm.stack[-1].int64);
 }
 
 static VMFunPtr vmfuns[] = {
@@ -87,7 +87,7 @@ static void run() {
     case INSTR_SUBI:
       dest = get_loc();
       src = get_loc();
-      dest->i64 -= src->i64;
+      dest->int64 -= src->int64;
       break;
 
     case INSTR_SUBF:
@@ -103,19 +103,19 @@ static void run() {
 
     case INSTR_POP:
       dest = get_loc();
-      vm.stack -= dest->u64;
+      vm.stack -= dest->uint64;
       break;
 
     case INSTR_CALL: {
       unsigned char *next = get_addr();
-      vm.stack->u64 = (u64)vm.instr;
+      vm.stack->uint64 = (u64)vm.instr;
       ++vm.stack;
       vm.instr = next;
       break;
     }
 
     case INSTR_ECALL: {
-      VMFun f = get_reg()->u64;
+      VMFun f = (VMFun)get_reg()->uint64;
       if (f >= VMFUN_NUM)
         vm_error("Invalid host function %i\n", (int)f);
       vmfuns[f]();
@@ -127,7 +127,7 @@ static void run() {
       break;
 
     case INSTR_RET:
-      vm.instr = vm.program_start + vm.stack[-get_reg()->u64 - 1].u64;
+      vm.instr = vm.program_start + vm.stack[-get_reg()->uint64 - 1].uint64;
       break;
     }
   }
@@ -142,7 +142,7 @@ int main(int argc, const char **argv) {
   vm.program = file_open(argv[0]);
   vm.instr = (unsigned char*)vm.program.data;
   vm.program_start = vm.instr;
-  vm.stack = malloc(sizeof(*vm.stack) * 1024);
+  vm.stack = (Register*)malloc(sizeof(*vm.stack) * 1024);
 
 
   run();

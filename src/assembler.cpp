@@ -1,5 +1,5 @@
 #include "common.h"
-#include "array.h"
+#include "array.hpp"
 #define MEM_IMPLEMENTATION
 #include "mem.h"
 #include <ctype.h>
@@ -40,13 +40,13 @@ struct AssemblerState {
   FileCache file_cache;
   File file;
 
-  Array(int) unresolved;
-  Array(Symbol) symbols;
-  Array(char) program;
+  Array<int> unresolved;
+  Array<Symbol> symbols;
+  Array<u8> program;
 
   LStack identifier_mem;
 
-  Array(Variable) variables;
+  Array<Variable> variables;
 
   char *tok_cursor, *tok_start;
   Token token;
@@ -79,7 +79,7 @@ static char* identifier_alloc() {
   if (assembler.tok_identifier.len > assembler.identifier_mem.block_size)
     assemble_error("Identifier length (%i) exeeded limit (%i)\n", assembler.tok_identifier.len, assembler.identifier_mem.block_size);
 
-  s = lstack_push_ex(&assembler.identifier_mem, assembler.tok_identifier.len+1, 1);
+  s = (char*)lstack_push_ex(&assembler.identifier_mem, assembler.tok_identifier.len+1, 1);
   memcpy(s, assembler.tok_identifier.str, assembler.tok_identifier.len);
   s[assembler.tok_identifier.len] = 0;
   return s;
@@ -207,7 +207,7 @@ static void token_next() {
 }
 
 static int address() {
-  return array_len(assembler.program);
+  return assembler.program.size;
 }
 
 static Symbol* find_symbol(String name) {
@@ -231,7 +231,6 @@ static void save_symbol() {
   /* check if symbol already exists */
   sp = find_symbol(assembler.tok_identifier);
   if (sp) {
-    int i;
     int old_addr;
     /* resolve the places we used it */
 
@@ -240,11 +239,11 @@ static void save_symbol() {
     old_addr = sp->address;
     sp->address = address();
 
-    for (i = 0; i < array_len(assembler.unresolved); ++i) {
+    for (int i = 0; i < assembler.unresolved.size; ++i) {
       if (assembler.unresolved[i] != old_addr)
         continue;
-      ((Register*)&assembler.program[assembler.unresolved[i]])->i64 = sp->address;
-      array_remove_fast(assembler.unresolved, i);
+      ((Register*)&assembler.program[assembler.unresolved[i]])->int64 = sp->address;
+      array_remove(assembler.unresolved, i);
       --i;
     }
     return;
@@ -285,17 +284,15 @@ static void newline() {
 }
 
 static DataType get_type() {
-  int i;
-
   if (assembler.token != TOKEN_IDENTIFIER)
     assemble_error("Expected type, but got %s\n", token_name());
 
-  for (i = 1; i < ARRAY_LEN(datatype_names); ++i)
+  for (int i = 1; i < ARRAY_LEN(datatype_names); ++i)
     if (streqc(assembler.tok_identifier, datatype_names[i]))
-      return i;
+      return (DataType)i;
 
   assemble_error("Unknown type %s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
-  return 0;
+  return DATATYPE_NULL;
 }
 
 static VMFun get_vmfun() {
@@ -306,10 +303,10 @@ static VMFun get_vmfun() {
 
   for (i = 1; i < ARRAY_LEN(vmfun_names); ++i)
     if (streqc(assembler.tok_identifier, vmfun_names[i]))
-      return i;
+      return (VMFun)i;
 
   assemble_error("Uknown host function %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
-  return 0;
+  return VMFUN_NULL;
 }
 
 static void add_variable() {
@@ -340,11 +337,11 @@ static void add_variable() {
 }
 
 static void add_instruction(Instruction instr) {
-  array_push(assembler.program, instr);
+  array_push(assembler.program, (u8)instr);
   token_next();
 }
 
-#define add_val(type, val) (((Register*)array_push_n(assembler.program, (int)sizeof(Register)))->type = val)
+#define add_val(type, val) (((Register*)array_pushn(assembler.program, (int)sizeof(Register)))->type = val)
 
 static int get_variable_offset(String name) {
   Variable *var;
@@ -354,7 +351,7 @@ static int get_variable_offset(String name) {
   if (!var)
     assemble_error("Unknown variable %.*s\n", name.len, name.str);
 
-  offset = array_len(assembler.variables) - (var - assembler.variables);
+  offset = assembler.variables.size - (var - assembler.variables.data);
   if (var->vartype != TOKEN_VAR)
     ++offset;
 
@@ -365,7 +362,7 @@ static void add_symbol() {
   if (assembler.token != TOKEN_IDENTIFIER)
     assemble_error("Expected identifier for symbol, but got %s\n", token_name());
 
-  add_val(i64, symbol_address());
+  add_val(int64, symbol_address());
   token_next();
 }
 
@@ -376,25 +373,25 @@ static Instruction get_instruction() {
     assemble_error("Expected instruction, but got %s\n", token_name());
   for (i = 0; i < ARRAY_LEN(instruction_names); ++i)
     if (streqc(assembler.tok_identifier, instruction_names[i]))
-      return i;
+      return (Instruction)i;
   return INSTR_NULL;
 }
 
 static void add_location(int dest) {
   if (assembler.token == TOKEN_IDENTIFIER) {
-    array_push(assembler.program, DATATYPE_STACK);
-    add_val(i64, get_variable_offset(assembler.tok_identifier));
+    array_push(assembler.program, (u8)DATATYPE_STACK);
+    add_val(int64, get_variable_offset(assembler.tok_identifier));
     goto done;
   }
   if (dest)
     assemble_error("Only integers can be used as destination\n");
 
   if (assembler.token == TOKEN_INT) {
-    array_push(assembler.program, DATATYPE_I64);
-    add_val(i64, assembler.tok_integer);
+    array_push(assembler.program, (u8)DATATYPE_I64);
+    add_val(int64, assembler.tok_integer);
   }
   else if (assembler.token == TOKEN_FLOAT) {
-    array_push(assembler.program, DATATYPE_F64);
+    array_push(assembler.program, (u8)DATATYPE_F64);
     add_val(f64, assembler.tok_float);
   }
 
@@ -421,9 +418,9 @@ static void assemble() {
 
       /* main? */
       if (streqc(assembler.tok_identifier, "Main")) {
-        if (((Register*)assembler.program)->u64)
+        if (((Register*)assembler.program.data)->uint64)
           assemble_error("Multiple declarations of Main\n");
-        ((Register*)assembler.program)->u64 = array_len(assembler.program);
+        ((Register*)assembler.program.data)->uint64 = assembler.program.size;
         is_main = 1;
       }
 
@@ -438,7 +435,7 @@ static void assemble() {
       token_next();
       newline();
 
-      array_resize(assembler.variables, 0);
+      assembler.variables.size = 0;
       while (assembler.token == TOKEN_OUT)
         add_variable();
       while (assembler.token == TOKEN_ARG)
@@ -450,7 +447,7 @@ static void assemble() {
         switch (assembler.token) {
 
           case TOKEN_IDENTIFIER: {
-            switch (get_instruction(assembler.token)) {
+            switch (get_instruction()) {
               case INSTR_NUM:
               case INSTR_NULL:
                 assemble_error("Unrecognized command %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
@@ -492,14 +489,14 @@ static void assemble() {
 
                 add_instruction(INSTR_ECALL);
                 f = get_vmfun();
-                add_val(u64, f);
+                add_val(uint64, f);
                 token_next();
                 break;
               }
 
               case INSTR_RET:
                 add_instruction(INSTR_RET);
-                add_val(u64, num_variables);
+                add_val(uint64, num_variables);
                 break;
 
               case INSTR_EXIT:
@@ -546,7 +543,7 @@ static void assemble() {
     f = fopen("output.zbin", "wb");
     if (!f)
       assemble_error("Failed to open output file %s: %s\n", "output.zbin", strerror(errno));
-    if (fwrite(assembler.program, array_len(assembler.program), 1, f) != 1)
+    if (fwrite(assembler.program, assembler.program.size, 1, f) != 1)
       assemble_error("Failed to write to output: %s\n", strerror(errno));
     fclose(f);
   }
@@ -575,7 +572,7 @@ static void assembler_init(const char *filename) {
     if (!token_names[i])
       assemble_error("Token name %i not defined\n", i);
 
-  add_val(u64, 0);
+  add_val(uint64, 0);
 }
 
 int main(int argc, const char **argv) {

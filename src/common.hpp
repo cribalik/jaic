@@ -62,15 +62,15 @@ static void die(const char* fmt, ...) {
 
 /* Terminal textstyles */
 
-static char* RED = "";
-static char* GREEN = "";
-static char* YELLOW = "";
-static char* BLUE = "";
-static char* BOLD = "";
-static char* UNBOLD = "";
-static char* RESET_FORMAT = "";
-static char* RESET_COLOR = "";
-static char* RESET = "";
+static const char* RED = "";
+static const char* GREEN = "";
+static const char* YELLOW = "";
+static const char* BLUE = "";
+static const char* BOLD = "";
+static const char* UNBOLD = "";
+static const char* RESET_FORMAT = "";
+static const char* RESET_COLOR = "";
+static const char* RESET = "";
 
 static void init_formatting() {
   #ifdef LINUX
@@ -118,7 +118,7 @@ static void file_put(FileCache *cache, const char *filename);
 
 static File* file_get(FileCache *cache, const char *filename) {
   if (!cache->file) {
-    cache->file = malloc(sizeof(*cache->file));
+    cache->file = (File*)malloc(sizeof(*cache->file));
     *cache->file = file_open(filename);
   }
   ++cache->file->refcount;
@@ -195,7 +195,7 @@ static const char *datatype_names[] = {
 };
 STATIC_ASSERT(ARRAY_LEN(datatype_names) == DATATYPE_NUM, all_datatypes_named);
 
-typedef enum Instruction {
+enum Instruction {
   INSTR_NULL = 0,
 
   INSTR_MV,
@@ -209,7 +209,7 @@ typedef enum Instruction {
   INSTR_EXIT,
 
   INSTR_NUM
-} Instruction;
+};
 
 static const char *instruction_names[] = {
   0,
@@ -227,14 +227,14 @@ STATIC_ASSERT(ARRAY_LEN(instruction_names) == INSTR_NUM, all_instructions_named)
 
 typedef union Register Register;
 union Register {
-  i8  i8;
-  i16 i16;
-  i32 i32;
-  i64 i64;
-  u8  u8;
-  u16 u16;
-  u32 u32;
-  u64 u64;
+  i8  int8;
+  i16 int16;
+  i32 int32;
+  i64 int64;
+  u8  uint8;
+  u16 uint16;
+  u32 uint32;
+  u64 uint64;
   float f32;
   double f64;
   u64 ptr;
@@ -255,7 +255,7 @@ static const char *vmfun_names[] = {
 STATIC_ASSERT(ARRAY_LEN(vmfun_names) == VMFUN_NUM, all_vmfuns_named);
 
 static File file_open(const char *filename) {
-  File result = {0};
+  File result = {};
   FILE *f;
   char *data;
   long size, num_read;
@@ -270,7 +270,7 @@ static File file_open(const char *filename) {
   fseek(f, 0, SEEK_SET);
 
   /* read data */
-  data = malloc(size+1);
+  data = (char*)malloc(size+1);
   data[size] = 0;
   num_read = fread(data, 1, size, f);
   if (num_read != size)

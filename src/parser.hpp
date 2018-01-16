@@ -1,6 +1,6 @@
 #define MEM_IMPLEMENTATION
 #include "mem.h"
-#include "array.h"
+#include "array.hpp"
 #include "common.h"
 #include <string.h>
 #include <errno.h>
@@ -287,7 +287,7 @@ static void parser_init(FileCache *cache, File *file) {
 
   lblock_init(&parser.nodes, 4096, sizeof(Node));
 
-  parser.root = lblock_get(&parser.nodes);
+  parser.root = (Node*)lblock_get(&parser.nodes);
   parser.root->head.type = NODE_TYPE_COMPOUND;
 
   lstack_init(&parser.identifier_mem, 4096);
@@ -323,7 +323,7 @@ static void parse__error(const char *fmt, ...) {
 #endif
 
 static Node* node_alloc() {
-  Node *n = lblock_get(&parser.nodes);
+  Node *n = (Node*)lblock_get(&parser.nodes);
   memset(n, 0, sizeof(*n));
   n->head.file_pos = get_filepos();
   return n;
@@ -339,7 +339,7 @@ static char* identifier_alloc() {
   if (parser.tok_identifier_len > parser.identifier_mem.block_size)
     parse_error("Identifier length (%i) exeeded limit (%i)\n", parser.tok_identifier_len, parser.identifier_mem.block_size);
 
-  s = lstack_push_ex(&parser.identifier_mem, parser.tok_identifier_len+1, 1);
+  s = (char*)lstack_push_ex(&parser.identifier_mem, parser.tok_identifier_len+1, 1);
   memcpy(s, parser.tok_identifier, parser.tok_identifier_len);
   s[parser.tok_identifier_len] = 0;
   return s;
@@ -351,7 +351,7 @@ static char* string_alloc() {
   if (parser.tok_string_len > parser.identifier_mem.block_size)
     parse_error("Identifier length (%i) exeeded limit (%i)\n", parser.tok_string_len, parser.identifier_mem.block_size);
 
-  s = lstack_push_ex(&parser.identifier_mem, parser.tok_string_len+1, 1);
+  s = (char*)lstack_push_ex(&parser.identifier_mem, parser.tok_string_len+1, 1);
   memcpy(s, parser.tok_string, parser.tok_string_len);
   s[parser.tok_string_len] = 0;
   return s;
@@ -375,17 +375,16 @@ typedef enum Token {
   TOKEN_STRING = -16
 } Token;
 
-static char* token_as_string() {
+static const char* token_as_string() {
   static char buffer[2] = {0};
   char *s;
-  Token t;
 
   if (parser.token >= 0) {
     buffer[0] = parser.token;
     return buffer;
   }
 
-  t = parser.token;
+  Token t = (Token)parser.token;
   switch (t) {
     case TOKEN_FLOAT:
       return "<float>";
@@ -406,7 +405,7 @@ static char* token_as_string() {
     case TOKEN_DOUBLE_EQUALS:
       return "==";
     case TOKEN_IDENTIFIER:
-      s = malloc(parser.tok_identifier_len+1);
+      s = (char*)malloc(parser.tok_identifier_len+1);
       memcpy(s, parser.tok_identifier, parser.tok_identifier_len);
       s[parser.tok_identifier_len] = 0;
       return s;
@@ -770,7 +769,7 @@ static Node* parse_statement() {
 
       /* vararg? */
       if (parser.token == TOKEN_TRIPLEDOT) {
-        n->function.flags |= FUNCTION_VARARG;
+        n->function.flags = (FunctionFlag)(n->function.flags | FUNCTION_VARARG);
         token_next();
         if (parser.token != ')')
           parse_error("Vararg must be at the end of parameter list\n");
@@ -824,7 +823,7 @@ static Node* parse_statement() {
       if (parser.token != TOKEN_IDENTIFIER || !token_identifier_eq("foreign"))
         parse_error("Invalid compiler directive, did you mean to use 'foreign' ?\n");
       token_next();
-      n->function.flags |= FUNCTION_FOREIGN;
+      n->function.flags = (FunctionFlag)(n->function.flags | FUNCTION_FOREIGN);
       return n;
     }
 
