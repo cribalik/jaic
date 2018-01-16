@@ -1,6 +1,5 @@
 #define MEM_IMPLEMENTATION
 #include "mem.hpp"
-#include "array.hpp"
 #include "common.hpp"
 #include <string.h>
 #include <errno.h>
@@ -48,7 +47,7 @@ typedef enum NodeType {
   NODE_TYPE_FN,
   NODE_TYPE_PARAMETER,
   NODE_TYPE_RETURN,
-  NODE_TYPE_TAG,
+  NODE_TYPE_LABEL,
 
   NODE_TYPE_COUNT
 } NodeType;
@@ -192,7 +191,7 @@ union Node {
     NodeHeader head;
     char *name;
     Node *target;
-  } tag;
+  } label;
 
 };
 
@@ -679,14 +678,14 @@ static Node* parse_statement() {
     if (token_peek() != ':')
       break;
 
-    n->head.type = NODE_TYPE_TAG;
-    n->tag.name = identifier_alloc();
+    n->head.type = NODE_TYPE_LABEL;
+    n->label.name = identifier_alloc();
     token_next();
     if (parser.token == ';') {
       token_next();
       return n;
     }
-    n->tag.target = parse_statement();
+    n->label.target = parse_statement();
     return n;
 
   case TOKEN_LOOP:
