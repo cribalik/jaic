@@ -1,4 +1,4 @@
-#include "common.h"
+#include "common.hpp"
 #include "array.hpp"
 
 static void vm_error(const char *fmt, ...) {

@@ -1,7 +1,7 @@
-#include "common.h"
+#include "common.hpp"
 #include "array.hpp"
 #define MEM_IMPLEMENTATION
-#include "mem.h"
+#include "mem.hpp"
 #include <ctype.h>
 
 typedef enum {

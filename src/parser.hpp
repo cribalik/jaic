@@ -1,7 +1,7 @@
 #define MEM_IMPLEMENTATION
-#include "mem.h"
+#include "mem.hpp"
 #include "array.hpp"
-#include "common.h"
+#include "common.hpp"
 #include <string.h>
 #include <errno.h>
 #include <ctype.h>
