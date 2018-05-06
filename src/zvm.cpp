@@ -15,7 +15,7 @@ static void vm_error(const char *fmt, ...) {
 
 typedef struct VMState {
   File program;
-  Register* stack;
+  Word* stack;
   unsigned char *instr;
   unsigned char *program_start;
 } VMState;
@@ -30,30 +30,34 @@ DataType get_regtype() {
   return (DataType)*vm.instr++;
 }
 
-Register* get_reg() {
-  Register *r;
-  r = (Register*)vm.instr;
-  vm.instr += sizeof(Register);
+Word* get_literal() {
+  Word *r;
+  r = (Word*)vm.instr;
+  vm.instr += sizeof(Word);
+  printf("got literal %lu\n", r->uint64);
   return r;
 }
 
-Register* get_loc() {
+Word* get_value() {
   DataType t = get_regtype();
   switch (t) {
   case DATATYPE_NUM:
   case DATATYPE_NULL:
     vm_error("Got null instruction\n");
-  case DATATYPE_I64:
-  case DATATYPE_F64:
-    return get_reg();
+  case DATATYPE_LITERAL_I64:
+  case DATATYPE_LITERAL_F64:
+    return get_literal();
   case DATATYPE_STACK:
-    return vm.stack - get_reg()->int64;
+    printf("got stack value\n");
+    Word *w = vm.stack - get_literal()->int64;
+    printf("value on stack was %li\n", w->int64);
+    return w;
   }
   return 0;
 }
 
 unsigned char* get_addr() {
-  return vm.program_start + get_reg()->uint64;
+  return vm.program_start + get_literal()->uint64;
 }
 
 typedef void (*VMFunPtr)(void);
@@ -68,7 +72,7 @@ static VMFunPtr vmfuns[] = {
 STATIC_ASSERT(ARRAY_LEN(vmfuns) == VMFUN_NUM, all_vmfuns_defined);
 
 static void run() {
-  Register *dest, *src;
+  Word *dest, *src;
 
   vm.instr = get_addr();
 
@@ -79,43 +83,56 @@ static void run() {
       vm_error("Unknown instruction");
 
     case INSTR_MV:
-      dest = get_loc();
-      src = get_loc();
+      puts("mv");
+      dest = get_value();
+      src = get_value();
       *dest = *src;
       break;
 
     case INSTR_SUBI:
-      dest = get_loc();
-      src = get_loc();
+      puts("subi");
+      dest = get_value();
+      src = get_value();
       dest->int64 -= src->int64;
       break;
 
     case INSTR_SUBF:
-      dest = get_loc();
-      src = get_loc();
+      puts("subf");
+      dest = get_value();
+      src = get_value();
       dest->f64 -= src->f64;
       break;
 
     case INSTR_PUSH:
-      dest = get_loc();
+      puts("push");
+      dest = get_value();
       *vm.stack++ = *dest;
       break;
 
+    case INSTR_PUSHN:
+      puts("pushn");
+      vm.stack += get_value()->uint64;
+      break;
+
     case INSTR_POP:
-      dest = get_loc();
+      puts("pop");
+      dest = get_value();
       vm.stack -= dest->uint64;
       break;
 
     case INSTR_CALL: {
+      printf("function call\n");
       unsigned char *next = get_addr();
-      vm.stack->uint64 = (u64)vm.instr;
+      vm.stack->uint64 = vm.instr - vm.program_start;
       ++vm.stack;
+      printf("from %li\n", (i64)(vm.instr - vm.program_start));
       vm.instr = next;
       break;
     }
 
     case INSTR_ECALL: {
-      VMFun f = (VMFun)get_reg()->uint64;
+      puts("ecall");
+      VMFun f = (VMFun)get_literal()->uint64;
       if (f >= VMFUN_NUM)
         vm_error("Invalid host function %i\n", (int)f);
       vmfuns[f]();
@@ -126,9 +143,14 @@ static void run() {
       exit(0);
       break;
 
-    case INSTR_RET:
-      vm.instr = vm.program_start + vm.stack[-get_reg()->uint64 - 1].uint64;
+    case INSTR_RET: {
+      u64 st = get_literal()->uint64;
+      vm.stack -= st;
+      vm.instr = vm.program_start + vm.stack[-1].uint64;
+      --vm.stack;
+      printf("Return to %lu\n", vm.instr - vm.program_start);
       break;
+    }
     }
   }
 }
@@ -139,11 +161,12 @@ int main(int argc, const char **argv) {
   if (argc < 1)
     vm_error("Usage: zvm FILE\n");
 
+  puts("Starting Zen VM");
+
   vm.program = file_open(argv[0]);
   vm.instr = (unsigned char*)vm.program.data;
   vm.program_start = vm.instr;
-  vm.stack = (Register*)malloc(sizeof(*vm.stack) * 1024);
-
+  vm.stack = (Word*)malloc(sizeof(*vm.stack) * 1024);
 
   run();
 

@@ -4,7 +4,7 @@
 #include "mem.hpp"
 #include <ctype.h>
 
-typedef enum {
+enum Token {
   TOKEN_NULL = 0,
 
   TOKEN_IDENTIFIER,
@@ -20,27 +20,31 @@ typedef enum {
   TOKEN_VAR,
 
   TOKEN_COUNT
-} Token;
+};
 
 const char *token_names[TOKEN_COUNT];
-typedef struct AssemblerState AssemblerState;
 
-typedef struct Symbol {
+struct Symbol {
   String name;
   int address;
-} Symbol;
+};
 
-typedef struct Variable {
+struct Variable {
   Token vartype;
   DataType type;
   String name;
-} Variable;
+};
+
+struct UnresolvedSymbol {
+  int id;
+  int location;
+};
 
 struct AssemblerState {
   FileCache file_cache;
   File file;
 
-  Array<int> unresolved;
+  Array<UnresolvedSymbol> unresolved;
   Array<Symbol> symbols;
   Array<u8> program;
 
@@ -100,7 +104,7 @@ static void parse_error(const char *fmt, ...) {
 }
 
 static int token_identifier_eq(const char *str) {
-  return streqc(assembler.tok_identifier, str);
+  return streq(assembler.tok_identifier, str);
 }
 
 static void token_next() {
@@ -225,52 +229,30 @@ static Variable* find_variable(String name) {
 }
 
 static void save_symbol() {
-  Symbol *sp;
-  Symbol s;
-
-  /* check if symbol already exists */
-  sp = find_symbol(assembler.tok_identifier);
+  /* check if we have already encountered the symbol */
+  Symbol *sp = find_symbol(assembler.tok_identifier);
   if (sp) {
-    int old_addr;
     /* resolve the places we used it */
-
     if (sp->address >= 0)
       assemble_error("%.*s defined multiple times\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
-    old_addr = sp->address;
+    int id = sp->address;
     sp->address = address();
 
     for (int i = 0; i < assembler.unresolved.size; ++i) {
-      if (assembler.unresolved[i] != old_addr)
+      if (assembler.unresolved[i].id != id)
         continue;
-      ((Register*)&assembler.program[assembler.unresolved[i]])->int64 = sp->address;
+      ((Word*)&assembler.program[assembler.unresolved[i].location])->int64 = sp->address;
       array_remove(assembler.unresolved, i);
       --i;
     }
+    printf("Symbol %.*s found at offset %i \n", sp->name.len, sp->name.str, (int)sp->address);
     return;
   }
 
-  s.name = assembler.tok_identifier;
-  s.address = address();
-  array_push(assembler.symbols, s);
+  array_push(assembler.symbols, Symbol{assembler.tok_identifier, address()});
+  printf("Symbol %.*s found at offset %i \n", assembler.tok_identifier.len, assembler.tok_identifier.str, address());
 }
 
-static int symbol_address() {
-  Symbol *s;
-
-  s = find_symbol(assembler.tok_identifier);
-  /* if symbol doesn't exist, create a new symbol with negative address */
-  if (!s) {
-    static int invalid_address;
-    Symbol new_sym;
-
-    new_sym.name = assembler.tok_identifier;
-    new_sym.address = --invalid_address;
-
-    array_push(assembler.symbols, new_sym);
-    s = array_last(assembler.symbols);
-  }
-  return s->address;
-}
 
 static const char* token_name() {
   return token_names[assembler.token];
@@ -288,21 +270,19 @@ static DataType get_type() {
     assemble_error("Expected type, but got %s\n", token_name());
 
   for (int i = 1; i < ARRAY_LEN(datatype_names); ++i)
-    if (streqc(assembler.tok_identifier, datatype_names[i]))
+    if (streq(assembler.tok_identifier, datatype_names[i]))
       return (DataType)i;
 
-  assemble_error("Unknown type %s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+  assemble_error("Unknown type %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
   return DATATYPE_NULL;
 }
 
 static VMFun get_vmfun() {
-  int i;
-
   if (assembler.token != TOKEN_IDENTIFIER)
     assemble_error("Expected vm function, but got %s\n", token_name());
 
-  for (i = 1; i < ARRAY_LEN(vmfun_names); ++i)
-    if (streqc(assembler.tok_identifier, vmfun_names[i]))
+  for (int i = 1; i < ARRAY_LEN(vmfun_names); ++i)
+    if (streq(assembler.tok_identifier, vmfun_names[i]))
       return (VMFun)i;
 
   assemble_error("Uknown host function %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
@@ -337,11 +317,11 @@ static void add_variable() {
 }
 
 static void add_instruction(Instruction instr) {
-  array_push(assembler.program, (u8)instr);
+  array_push(assembler.program, (Instruction_t)instr);
   token_next();
 }
 
-#define add_val(type, val) (((Register*)array_pushn(assembler.program, (int)sizeof(Register)))->type = val)
+#define add_val(type, val) (((Word*)array_pushn(assembler.program, (int)sizeof(Word)))->type = val)
 
 static int get_variable_offset(String name) {
   Variable *var;
@@ -351,7 +331,7 @@ static int get_variable_offset(String name) {
   if (!var)
     assemble_error("Unknown variable %.*s\n", name.len, name.str);
 
-  offset = assembler.variables.size - (var - assembler.variables.data);
+  offset = assembler.variables.size - (var - assembler.variables.items);
   if (var->vartype != TOKEN_VAR)
     ++offset;
 
@@ -362,36 +342,61 @@ static void add_symbol() {
   if (assembler.token != TOKEN_IDENTIFIER)
     assemble_error("Expected identifier for symbol, but got %s\n", token_name());
 
-  add_val(int64, symbol_address());
+  Symbol *s = find_symbol(assembler.tok_identifier);
+
+  /* if symbol doesn't exist, create a new symbol with negative address */
+  if (!s) {
+    static int invalid_address;
+    Symbol new_sym;
+    printf("Creating temporary symbol %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+
+    new_sym.name = assembler.tok_identifier;
+    new_sym.address = --invalid_address;
+
+    array_push(assembler.symbols, new_sym);
+    s = array_last(assembler.symbols);
+  }
+
+  // remember this location so we can resolve it later
+  if (s->address < 0)
+    array_push(assembler.unresolved, UnresolvedSymbol{s->address, address()});
+
+  add_val(int64, s->address);
   token_next();
 }
 
 static Instruction get_instruction() {
-  int i;
-
   if (assembler.token != TOKEN_IDENTIFIER)
     assemble_error("Expected instruction, but got %s\n", token_name());
-  for (i = 0; i < ARRAY_LEN(instruction_names); ++i)
-    if (streqc(assembler.tok_identifier, instruction_names[i]))
+  for (int i = 0; i < ARRAY_LEN(instruction_names); ++i)
+    if (streq(assembler.tok_identifier, instruction_names[i]))
       return (Instruction)i;
   return INSTR_NULL;
 }
 
-static void add_location(int dest) {
+static void add_location(bool dest) {
+  bool address_of = false;
+  // if (assembler.token == TOKEN_AMPERSAND) {
+  //   address_of = true;
+  //   token_next();
+  // }
+
   if (assembler.token == TOKEN_IDENTIFIER) {
-    array_push(assembler.program, (u8)DATATYPE_STACK);
+    array_push(assembler.program, (DataType_t)DATATYPE_STACK);
     add_val(int64, get_variable_offset(assembler.tok_identifier));
     goto done;
   }
   if (dest)
     assemble_error("Only integers can be used as destination\n");
+  if (address_of)
+    assemble_error("Expected identifier after ampersand, but got %s", token_name);
 
   if (assembler.token == TOKEN_INT) {
-    array_push(assembler.program, (u8)DATATYPE_I64);
+    array_push(assembler.program, (DataType_t)DATATYPE_LITERAL_I64);
     add_val(int64, assembler.tok_integer);
   }
   else if (assembler.token == TOKEN_FLOAT) {
-    array_push(assembler.program, (u8)DATATYPE_F64);
+    array_push(assembler.program, (DataType_t)DATATYPE_LITERAL_F64);
     add_val(f64, assembler.tok_float);
   }
 
@@ -403,25 +408,24 @@ static void assemble() {
   token_next();
 
   while (1) {
-    /* resolve tags */
     switch (assembler.token) {
     case TOKEN_EOF:
       goto assemble_done;
 
     case TOKEN_FN: {
-      int is_main = 0;
+      bool is_main = false;
       int num_variables = 0;
 
       token_next();
       if (assembler.token != TOKEN_IDENTIFIER)
-        assemble_error("Expected identifier after fn, but got %s\n", token_name());
+        assemble_error("Expected function name after fn, but got %s\n", token_name());
 
       /* main? */
-      if (streqc(assembler.tok_identifier, "Main")) {
-        if (((Register*)assembler.program.data)->uint64)
+      if (streq(assembler.tok_identifier, "Main")) {
+        if (((Word*)assembler.program.items)->uint64)
           assemble_error("Multiple declarations of Main\n");
-        ((Register*)assembler.program.data)->uint64 = assembler.program.size;
-        is_main = 1;
+        ((Word*)assembler.program.items)->uint64 = assembler.program.size;
+        is_main = true;
       }
 
       save_symbol();
@@ -443,6 +447,12 @@ static void assemble() {
       while (assembler.token == TOKEN_VAR)
         add_variable(), ++num_variables;
 
+      if (num_variables) {
+        array_push(assembler.program, (Instruction_t)INSTR_PUSHN);
+        array_push(assembler.program, (DataType_t)DATATYPE_LITERAL_I64);
+        add_val(uint64, (u64)num_variables);
+      }
+
       while (1) {
         switch (assembler.token) {
 
@@ -451,32 +461,38 @@ static void assemble() {
               case INSTR_NUM:
               case INSTR_NULL:
                 assemble_error("Unrecognized command %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
+
               case INSTR_MV:
                 add_instruction(INSTR_MV);
-                add_location(1);
-                add_location(0);
+                add_location(true);
+                add_location(false);
                 break;
 
               case INSTR_SUBI:
                 add_instruction(INSTR_SUBI);
-                add_location(1);
-                add_location(0);
+                add_location(true);
+                add_location(false);
                 break;
 
               case INSTR_SUBF:
                 add_instruction(INSTR_SUBF);
-                add_location(1);
-                add_location(0);
+                add_location(true);
+                add_location(false);
                 break;
 
               case INSTR_PUSH:
                 add_instruction(INSTR_PUSH);
-                add_location(0);
+                add_location(false);
+                break;
+
+              case INSTR_PUSHN:
+                add_instruction(INSTR_PUSHN);
+                add_location(false);
                 break;
 
               case INSTR_POP:
                 add_instruction(INSTR_POP);
-                add_location(0);
+                add_location(false);
                 break;
 
               case INSTR_CALL:
@@ -508,10 +524,14 @@ static void assemble() {
           }
 
           case TOKEN_RBRACE:
-            if (is_main)
+            if (is_main) {
               add_instruction(INSTR_EXIT);
-            else
+            }
+            else {
               add_instruction(INSTR_RET);
+              add_val(uint64, num_variables);
+              printf("adding return instruction %i\n", num_variables);
+            }
             goto fn_done;
 
           default:
@@ -532,26 +552,20 @@ static void assemble() {
 
   assemble_done:
 
-  {
-    Symbol *s;
-    array_foreach(assembler.symbols, s)
-      if (s->address < 0)
-        assemble_error("%.*s not defined\n", s->name.len, s->name.str);
-  }
-  {
-    FILE *f;
-    f = fopen("output.zbin", "wb");
-    if (!f)
-      assemble_error("Failed to open output file %s: %s\n", "output.zbin", strerror(errno));
-    if (fwrite(assembler.program, assembler.program.size, 1, f) != 1)
-      assemble_error("Failed to write to output: %s\n", strerror(errno));
-    fclose(f);
-  }
+  // check if all symbols are defined
+  for (Symbol &s : assembler.symbols)
+    if (s.address < 0)
+      assemble_error("%.*s not defined\n", s.name.len, s.name.str);
+
+  FILE *f = fopen("output.zbin", "wb");
+  if (!f)
+    assemble_error("Failed to open output file %s: %s\n", "output.zbin", strerror(errno));
+  if (fwrite(assembler.program.items, assembler.program.size, 1, f) != 1)
+    assemble_error("Failed to write to output: %s\n", strerror(errno));
+  fclose(f);
 }
 
 static void assembler_init(const char *filename) {
-  int i;
-
   filecache_init(&assembler.file_cache);
   assembler.file = *file_get(&assembler.file_cache, filename);
   assembler.tok_cursor = assembler.tok_start = assembler.file.data;
@@ -568,7 +582,7 @@ static void assembler_init(const char *filename) {
   token_names[TOKEN_EOF]        = "<eof>";
   token_names[TOKEN_OUT]        = "out";
   token_names[TOKEN_VAR]        = "var";
-  for (i = 0; i < TOKEN_COUNT; ++i)
+  for (int i = 0; i < TOKEN_COUNT; ++i)
     if (!token_names[i])
       assemble_error("Token name %i not defined\n", i);
 

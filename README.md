@@ -65,6 +65,7 @@ Basically, all of these features come down to implicit casting to parent type in
 # TODOS
 ## High
  * run arbitrary code in compiler (either as a vm running bytecode, or compiling and dynamically loading code as it is compiled)
+ * type-safe indexes into arrays, or special types for ranges of integer values
  * global variables
  * return void
  * don't allow access of variables not yet declared

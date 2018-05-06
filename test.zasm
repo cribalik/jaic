@@ -1,23 +1,18 @@
 fn Main
 {
-	out i64 r
-	mv r 0
-	push 3
-	ecall print
-	push 6
-	ecall print
-	pop 2
+  var i64 x
+  push 5
+  push 7
+  call Sub
+  pop 2
+  ecall print
 }
 
 fn Sub
 {
-	out i64 r
-	param i64 a
-	param i64 b
-	var i64 c
-	var i64 d
-	mv a c
-	mv b d
-	subi c d
-	mv r c
+  out i64 r
+  param i64 a
+  param i64 b
+  subi a b
+  mv r a
 }

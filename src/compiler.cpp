@@ -58,11 +58,9 @@ static int get_arguments(Node *fn, Node *result[], int n) {
 }
 
 static void do_compile() {
-  Node *n, *root;
-
   /* find main */
-  root = 0;
-  for (n = parser.root->compound.statements; n; n = n->head.next) {
+  Node *root = 0;
+  for (Node *n = parser.root->compound.statements; n; n = n->head.next) {
     if (n->head.type == NODE_TYPE_FN && strcmp(n->function.name, "main") == 0) {
       if (root) {
         compile_error_print(root, "Multiple definitions of main\n");
@@ -83,7 +81,6 @@ static void do_compile() {
 
 int main(int argc, const char **argv) {
   --argc, ++argv;
-
 
   if (argc < 1)
     print_usage(), exit(1);

@@ -88,10 +88,13 @@ static void init_formatting() {
   #endif /* LINUX */
 }
 
-typedef struct FileCache FileCache;
-typedef struct File File;
-typedef struct FilePos FilePos;
 
+struct FilePos {
+  const char *name;
+  int offset;
+};
+
+struct File;
 struct FileCache {
   /* TODO: implement */
   File *file;
@@ -107,14 +110,7 @@ struct File {
   int refcount;
 };
 
-struct FilePos {
-  const char *name;
-  int offset;
-};
-
 static File file_open(const char *filename);
-static File* file_get(FileCache *cache, const char *filename);
-static void file_put(FileCache *cache, const char *filename);
 
 static File* file_get(FileCache *cache, const char *filename) {
   if (!cache->file) {
@@ -173,19 +169,21 @@ static int streq(String a, String b) {
   return a.len == b.len && !memcmp(a.str, b.str, a.len);
 }
 
-static int streqc(String a, const char *b) {
+static int streq(String a, const char *b) {
   return a.str && b && (int)strlen(b) == a.len && !memcmp(a.str, b, a.len);
 }
 
-typedef enum DataType {
+enum DataType {
   DATATYPE_NULL = 0,
 
-  DATATYPE_I64,
-  DATATYPE_F64,
+  DATATYPE_LITERAL_I64,
+  DATATYPE_LITERAL_F64,
   DATATYPE_STACK,
 
   DATATYPE_NUM
-} DataType;
+};
+
+typedef u8 DataType_t;
 
 static const char *datatype_names[] = {
   0,
@@ -202,6 +200,7 @@ enum Instruction {
   INSTR_SUBI,
   INSTR_SUBF,
   INSTR_PUSH,
+  INSTR_PUSHN,
   INSTR_POP,
   INSTR_CALL,
   INSTR_ECALL,
@@ -211,12 +210,15 @@ enum Instruction {
   INSTR_NUM
 };
 
+typedef u8 Instruction_t;
+
 static const char *instruction_names[] = {
   0,
   "mv",
   "subi",
   "subf",
   "push",
+  "pushn",
   "pop",
   "call",
   "ecall",
@@ -225,8 +227,7 @@ static const char *instruction_names[] = {
 };
 STATIC_ASSERT(ARRAY_LEN(instruction_names) == INSTR_NUM, all_instructions_named);
 
-typedef union Register Register;
-union Register {
+union Word {
   i8  int8;
   i16 int16;
   i32 int32;
