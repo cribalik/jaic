@@ -480,6 +480,42 @@ static void assemble() {
                 add_location(false);
                 break;
 
+              case INSTR_ADDI:
+                add_instruction(INSTR_ADDI);
+                add_location(true);
+                add_location(false);
+                break;
+
+              case INSTR_ADDF:
+                add_instruction(INSTR_ADDF);
+                add_location(true);
+                add_location(false);
+                break;
+
+              case INSTR_MULI:
+                add_instruction(INSTR_MULI);
+                add_location(true);
+                add_location(false);
+                break;
+
+              case INSTR_MULF:
+                add_instruction(INSTR_MULF);
+                add_location(true);
+                add_location(false);
+                break;
+
+              case INSTR_DIVI:
+                add_instruction(INSTR_DIVI);
+                add_location(true);
+                add_location(false);
+                break;
+
+              case INSTR_DIVF:
+                add_instruction(INSTR_DIVF);
+                add_location(true);
+                add_location(false);
+                break;
+
               case INSTR_PUSH:
                 add_instruction(INSTR_PUSH);
                 add_location(false);

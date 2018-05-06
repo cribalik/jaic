@@ -103,6 +103,48 @@ static void run() {
       dest->f64 -= src->f64;
       break;
 
+    case INSTR_ADDI:
+      puts("addi");
+      dest = get_value();
+      src = get_value();
+      dest->int64 += src->int64;
+      break;
+
+    case INSTR_ADDF:
+      puts("addf");
+      dest = get_value();
+      src = get_value();
+      dest->f64 += src->f64;
+      break;
+
+    case INSTR_MULI:
+      puts("MULi");
+      dest = get_value();
+      src = get_value();
+      dest->int64 *= src->int64;
+      break;
+
+    case INSTR_MULF:
+      puts("MULf");
+      dest = get_value();
+      src = get_value();
+      dest->f64 *= src->f64;
+      break;
+
+    case INSTR_DIVI:
+      puts("DIVi");
+      dest = get_value();
+      src = get_value();
+      dest->int64 /= src->int64;
+      break;
+
+    case INSTR_DIVF:
+      puts("DIVf");
+      dest = get_value();
+      src = get_value();
+      dest->f64 /= src->f64;
+      break;
+
     case INSTR_PUSH:
       puts("push");
       dest = get_value();
