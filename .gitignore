@@ -2,3 +2,5 @@ build
 *.sublime-workspace
 output.c
 *.out
+*.obj
+*.zbin
