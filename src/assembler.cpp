@@ -1,6 +1,5 @@
 #include "common.hpp"
 #include "array.hpp"
-#define MEM_IMPLEMENTATION
 #include "mem.hpp"
 #include <ctype.h>
 
@@ -48,7 +47,7 @@ struct AssemblerState {
   Array<Symbol> symbols;
   Array<u8> program;
 
-  LStack identifier_mem;
+  StackAllocator<4096> identifier_mem;
 
   Array<Variable> variables;
 
@@ -78,12 +77,7 @@ static void assemble_error(const char *fmt, ...) {
 }
 
 static char* identifier_alloc() {
-  char *s;
-
-  if (assembler.tok_identifier.len > assembler.identifier_mem.block_size)
-    assemble_error("Identifier length (%i) exeeded limit (%i)\n", assembler.tok_identifier.len, assembler.identifier_mem.block_size);
-
-  s = (char*)lstack_push_ex(&assembler.identifier_mem, assembler.tok_identifier.len+1, 1);
+  char *s = assembler.identifier_mem.push_array<char>(assembler.tok_identifier.len+1);
   memcpy(s, assembler.tok_identifier.str, assembler.tok_identifier.len);
   s[assembler.tok_identifier.len] = 0;
   return s;
@@ -593,12 +587,8 @@ static void assemble() {
     if (s.address < 0)
       assemble_error("%.*s not defined\n", s.name.len, s.name.str);
 
-  FILE *f = fopen("output.zbin", "wb");
-  if (!f)
-    assemble_error("Failed to open output file %s: %s\n", "output.zbin", strerror(errno));
-  if (fwrite(assembler.program.items, assembler.program.size, 1, f) != 1)
-    assemble_error("Failed to write to output: %s\n", strerror(errno));
-  fclose(f);
+  if (!file_write("output.zbin", assembler.program.items, assembler.program.size))
+    assemble_error("Failed to write to output.zbin: %s", get_error());
 }
 
 static void assembler_init(const char *filename) {

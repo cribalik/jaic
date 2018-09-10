@@ -1,6 +1,11 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#ifdef _MSC_VER
+  #define OS_WINDOWS 1
+#else
+  #define OS_LINUX 1
+#endif
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -8,8 +13,9 @@
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>
 
-#ifdef LINUX
+#ifdef OS_LINUX
   #include <unistd.h>
 #endif
 
@@ -73,7 +79,7 @@ static const char* RESET_COLOR = "";
 static const char* RESET = "";
 
 static void init_formatting() {
-  #ifdef LINUX
+  #ifdef OS_LINUX
   if (isatty(1)) {
     RED = "\x1B[31m";
     GREEN = "\x1B[32m";
@@ -85,7 +91,7 @@ static void init_formatting() {
     RESET_COLOR = "\x1B[39m";
     RESET = "\x1B[0m\x1B[39m";
   }
-  #endif /* LINUX */
+  #endif /* OS_LINUX */
 }
 
 
@@ -267,15 +273,47 @@ static const char *vmfun_names[] = {
 };
 STATIC_ASSERT(ARRAY_LEN(vmfun_names) == VMFUN_NUM, all_vmfuns_named);
 
+static bool _file_open(FILE **f, const char *filename, const char *mode) {
+  #ifdef OS_WINDOWS
+  return !fopen_s(f, filename, mode);
+  #else
+  *f = fopen(filename, mode);
+  return *f != NULL;
+  #endif
+}
+
+static bool file_write(const char *filename, u8 *data, int size) {
+  FILE *f;
+  if (!_file_open(&f, filename, "wb"))
+    return false;
+
+  if (fwrite(data, size, 1, f) != 1) {
+    fclose(f);
+    return false;
+  }
+
+  fclose(f);
+  return true;
+}
+
+static const char* get_error() {
+  #ifdef OS_WINDOWS
+  static char buf[512];
+  strerror_s(buf, sizeof(buf), errno);
+  return buf;
+  #else
+  return strerror(errno);
+  #endif
+}
+
 static File file_open(const char *filename) {
   File result = {};
   FILE *f;
   char *data;
   long size, num_read;
 
-  f = fopen(filename, "rb");
-  if (!f)
-    die("Failed to open file %s: %s\n", filename, strerror(errno));
+  if (!_file_open(&f, filename, "rb"))
+    die("Failed to open file %s: %s\n", filename, get_error());
 
   /* calculate size */
   fseek(f, 0, SEEK_END);
@@ -287,7 +325,7 @@ static File file_open(const char *filename) {
   data[size] = 0;
   num_read = fread(data, 1, size, f);
   if (num_read != size)
-    die("Failed to read file %s: %s\n", filename, strerror(errno));
+    die("Failed to read file %s: %s\n", filename, get_error());
 
   fclose(f);
 

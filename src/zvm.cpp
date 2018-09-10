@@ -34,7 +34,7 @@ Word* get_literal() {
   Word *r;
   r = (Word*)vm.instr;
   vm.instr += sizeof(Word);
-  printf("got literal %lu\n", r->uint64);
+  printf("got literal %" PRIu64 "\n", r->uint64);
   return r;
 }
 
@@ -50,7 +50,7 @@ Word* get_value() {
   case DATATYPE_STACK:
     printf("got stack value\n");
     Word *w = vm.stack - get_literal()->int64;
-    printf("value on stack was %li\n", w->int64);
+    printf("value on stack was %" PRIi64 "\n", w->int64);
     return w;
   }
   return 0;
@@ -167,7 +167,7 @@ static void run() {
       unsigned char *next = get_addr();
       vm.stack->uint64 = vm.instr - vm.program_start;
       ++vm.stack;
-      printf("from %li\n", (i64)(vm.instr - vm.program_start));
+      printf("from %" PRIi64 "\n", (i64)(vm.instr - vm.program_start));
       vm.instr = next;
       break;
     }

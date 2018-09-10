@@ -184,12 +184,12 @@ static T* next(ArrayIter<T> &i) {
 }
 
 template<class T>
-T* begin(Array<T> &a) {
+T* begin(Array<T> a) {
 	return a.items;
 }
 
 template<class T>
-T* end(Array<T> &a) {
+T* end(Array<T> a) {
 	return a.items + a.size;
 }
 

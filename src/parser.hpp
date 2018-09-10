@@ -238,7 +238,7 @@ struct ParserState {
 
   /* AST */
   Node *root;
-  LBlock(Node) nodes;
+  SlotAllocator<Node, 4096> nodes;
   Node void_node;
 
   /* tokenizer */
@@ -256,7 +256,7 @@ struct ParserState {
 
   float tok_float;
 
-  LStack identifier_mem;
+  StackAllocator<4096> identifier_mem;
 
   /* current file */
   FileCache *file_cache;
@@ -284,12 +284,12 @@ static void parser_init(FileCache *cache, File *file) {
   parser.builtin_types[USIZE_TYPE].type = USIZE_TYPE;
   parser.builtin_types[STRING_TYPE].type = STRING_TYPE;
 
-  lblock_init(&parser.nodes, 4096, sizeof(Node));
+  parser.nodes.init();
 
-  parser.root = (Node*)lblock_get(&parser.nodes);
+  parser.root = parser.nodes.get();
   parser.root->head.type = NODE_TYPE_COMPOUND;
 
-  lstack_init(&parser.identifier_mem, 4096);
+  parser.identifier_mem.init();
 
   parser.tok_cursor = parser.tok_start = parser.file.data;
 }
@@ -322,23 +322,20 @@ static void parse__error(const char *fmt, ...) {
 #endif
 
 static Node* node_alloc() {
-  Node *n = (Node*)lblock_get(&parser.nodes);
+  Node *n = parser.nodes.get();
   memset(n, 0, sizeof(*n));
   n->head.file_pos = get_filepos();
   return n;
 }
 
 static void node_free(Node *n) {
-  lblock_put(&parser.nodes, n);
+  parser.nodes.put(n);
 }
 
 static char* identifier_alloc() {
   char *s;
 
-  if (parser.tok_identifier_len > parser.identifier_mem.block_size)
-    parse_error("Identifier length (%i) exeeded limit (%i)\n", parser.tok_identifier_len, parser.identifier_mem.block_size);
-
-  s = (char*)lstack_push_ex(&parser.identifier_mem, parser.tok_identifier_len+1, 1);
+  s = parser.identifier_mem.push_array<char>(parser.tok_identifier_len+1);
   memcpy(s, parser.tok_identifier, parser.tok_identifier_len);
   s[parser.tok_identifier_len] = 0;
   return s;
@@ -347,10 +344,7 @@ static char* identifier_alloc() {
 static char* string_alloc() {
   char *s;
 
-  if (parser.tok_string_len > parser.identifier_mem.block_size)
-    parse_error("Identifier length (%i) exeeded limit (%i)\n", parser.tok_string_len, parser.identifier_mem.block_size);
-
-  s = (char*)lstack_push_ex(&parser.identifier_mem, parser.tok_string_len+1, 1);
+  s = parser.identifier_mem.push_array<char>(parser.tok_string_len+1);
   memcpy(s, parser.tok_string, parser.tok_string_len);
   s[parser.tok_string_len] = 0;
   return s;
@@ -379,7 +373,7 @@ static const char* token_as_string() {
   char *s;
 
   if (parser.token >= 0) {
-    buffer[0] = parser.token;
+    buffer[0] = (char)parser.token;
     return buffer;
   }
 
@@ -572,7 +566,7 @@ static void token_next() {
 
     tmp = *parser.tok_cursor;
     *parser.tok_cursor = '\0';
-    parser.tok_float = strtod(parser.tok_start, 0);
+    parser.tok_float = strtof(parser.tok_start, 0);
     *parser.tok_cursor = tmp;
 
     parser.token = TOKEN_FLOAT;
@@ -610,8 +604,6 @@ static void token_next() {
     parser.token = *parser.tok_cursor++;
     goto done;
   }
-
-  parser.token = TOKEN_EOF;
 
   done:;
 }

@@ -27,6 +27,13 @@
       "file_regex":  "^([^ ][^:]+):([0-9]+):?([0-9]+)?:? (.*)$",
       "working_dir": ".",
       "selector": "source.zasm"
-    } 
+    } ,
+    {
+      "name": "windows",
+      "cmd": ["build.bat"],
+      "working_dir": "${project_path}",
+      "shell": true,
+      "file_regex": "^([^(\n]+)\\(([0-9]+)\\)[ ]*: ()([^\n]+)$"
+    }
   ]
 }
