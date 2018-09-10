@@ -34,7 +34,7 @@ Word* get_literal() {
   Word *r;
   r = (Word*)vm.instr;
   vm.instr += sizeof(Word);
-  printf("got literal %" PRIu64 "\n", r->uint64);
+  printf("%" PRIu64 "", r->uint64);
   return r;
 }
 
@@ -48,9 +48,9 @@ Word* get_value() {
   case DATATYPE_LITERAL_F64:
     return get_literal();
   case DATATYPE_STACK:
-    printf("got stack value\n");
+    printf("[-");
     Word *w = vm.stack - get_literal()->int64;
-    printf("value on stack was %" PRIi64 "\n", w->int64);
+    printf("]=%" PRIi64 " ", w->int64);
     return w;
   }
   return 0;
@@ -62,7 +62,7 @@ unsigned char* get_addr() {
 
 typedef void (*VMFunPtr)(void);
 static void vm_print() {
-  printf("%i\n", (int)vm.stack[-1].int64);
+  printf("\n## print: %i ##", (int)vm.stack[-1].int64);
 }
 
 static VMFunPtr vmfuns[] = {
@@ -83,97 +83,97 @@ static void run() {
       vm_error("Unknown instruction");
 
     case INSTR_MV:
-      puts("mv");
+      printf("\nmv ");
       dest = get_value();
       src = get_value();
       *dest = *src;
       break;
 
     case INSTR_SUBI:
-      puts("subi");
+      printf("\nsubi ");
       dest = get_value();
       src = get_value();
       dest->int64 -= src->int64;
       break;
 
     case INSTR_SUBF:
-      puts("subf");
+      printf("\nsubf ");
       dest = get_value();
       src = get_value();
       dest->f64 -= src->f64;
       break;
 
     case INSTR_ADDI:
-      puts("addi");
+      printf("\naddi ");
       dest = get_value();
       src = get_value();
       dest->int64 += src->int64;
       break;
 
     case INSTR_ADDF:
-      puts("addf");
+      printf("\naddf ");
       dest = get_value();
       src = get_value();
       dest->f64 += src->f64;
       break;
 
     case INSTR_MULI:
-      puts("MULi");
+      printf("\nMULi ");
       dest = get_value();
       src = get_value();
       dest->int64 *= src->int64;
       break;
 
     case INSTR_MULF:
-      puts("MULf");
+      printf("\nMULf ");
       dest = get_value();
       src = get_value();
       dest->f64 *= src->f64;
       break;
 
     case INSTR_DIVI:
-      puts("DIVi");
+      printf("\nDIVi ");
       dest = get_value();
       src = get_value();
       dest->int64 /= src->int64;
       break;
 
     case INSTR_DIVF:
-      puts("DIVf");
+      printf("\nDIVf ");
       dest = get_value();
       src = get_value();
       dest->f64 /= src->f64;
       break;
 
     case INSTR_PUSH:
-      puts("push");
+      printf("\npush ");
       dest = get_value();
       *vm.stack++ = *dest;
       break;
 
     case INSTR_PUSHN:
-      puts("pushn");
+      printf("\npushn ");
       vm.stack += get_value()->uint64;
       break;
 
     case INSTR_POP:
-      puts("pop");
+      printf("\npop ");
       dest = get_value();
       vm.stack -= dest->uint64;
       break;
 
     case INSTR_CALL: {
-      printf("function call\n");
+      printf("\nfunction call ");
       unsigned char *next = get_addr();
       vm.stack->uint64 = vm.instr - vm.program_start;
       ++vm.stack;
-      printf("from %" PRIi64 "\n", (i64)(vm.instr - vm.program_start));
+      printf(" from %" PRIi64, (i64)(vm.instr - vm.program_start));
       vm.instr = next;
       break;
     }
 
     case INSTR_ECALL: {
-      puts("ecall");
+      printf("\necall ");
       VMFun f = (VMFun)get_literal()->uint64;
       if (f >= VMFUN_NUM)
         vm_error("Invalid host function %i\n", (int)f);
@@ -182,15 +182,17 @@ static void run() {
     }
 
     case INSTR_EXIT:
+      printf("\nexit");
       exit(0);
       break;
 
     case INSTR_RET: {
+      printf("\npop ");
       u64 st = get_literal()->uint64;
-      vm.stack -= st;
       vm.instr = vm.program_start + vm.stack[-1].uint64;
       --vm.stack;
-      printf("Return to %lu\n", vm.instr - vm.program_start);
+      vm.stack -= st;
+      printf(" and return to %lu", vm.instr - vm.program_start);
       break;
     }
     }

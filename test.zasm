@@ -1,10 +1,10 @@
 fn Main
 {
   var i64 x
+  pushn 1
   push 5
   push 7
   call Sub
-  pop 2
   ecall print
 }
 

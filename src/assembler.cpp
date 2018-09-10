@@ -312,7 +312,6 @@ static void add_variable() {
 
 static void add_instruction(Instruction instr) {
   array_push(assembler.program, (Instruction_t)instr);
-  token_next();
 }
 
 #define add_val(type, val) (((Word*)array_pushn(assembler.program, (int)sizeof(Word)))->type = val)
@@ -409,6 +408,7 @@ static void assemble() {
     case TOKEN_FN: {
       bool is_main = false;
       int num_variables = 0;
+      int num_arguments = 0;
 
       token_next();
       if (assembler.token != TOKEN_IDENTIFIER)
@@ -437,7 +437,7 @@ static void assemble() {
       while (assembler.token == TOKEN_OUT)
         add_variable();
       while (assembler.token == TOKEN_ARG)
-        add_variable();
+        add_variable(), ++num_arguments;
       while (assembler.token == TOKEN_VAR)
         add_variable(), ++num_variables;
 
@@ -457,75 +457,88 @@ static void assemble() {
                 assemble_error("Unrecognized command %.*s\n", assembler.tok_identifier.len, assembler.tok_identifier.str);
 
               case INSTR_MV:
+                token_next();
                 add_instruction(INSTR_MV);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_SUBI:
+                token_next();
                 add_instruction(INSTR_SUBI);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_SUBF:
+                token_next();
                 add_instruction(INSTR_SUBF);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_ADDI:
+                token_next();
                 add_instruction(INSTR_ADDI);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_ADDF:
+                token_next();
                 add_instruction(INSTR_ADDF);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_MULI:
+                token_next();
                 add_instruction(INSTR_MULI);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_MULF:
+                token_next();
                 add_instruction(INSTR_MULF);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_DIVI:
+                token_next();
                 add_instruction(INSTR_DIVI);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_DIVF:
+                token_next();
                 add_instruction(INSTR_DIVF);
                 add_location(true);
                 add_location(false);
                 break;
 
               case INSTR_PUSH:
+                token_next();
                 add_instruction(INSTR_PUSH);
                 add_location(false);
                 break;
 
               case INSTR_PUSHN:
+                token_next();
                 add_instruction(INSTR_PUSHN);
                 add_location(false);
                 break;
 
               case INSTR_POP:
+                token_next();
                 add_instruction(INSTR_POP);
                 add_location(false);
                 break;
 
               case INSTR_CALL:
+                token_next();
                 add_instruction(INSTR_CALL);
                 add_symbol();
                 break;
@@ -533,6 +546,7 @@ static void assemble() {
               case INSTR_ECALL: {
                 VMFun f;
 
+                token_next();
                 add_instruction(INSTR_ECALL);
                 f = get_vmfun();
                 add_val(uint64, f);
@@ -541,11 +555,13 @@ static void assemble() {
               }
 
               case INSTR_RET:
+                token_next();
                 add_instruction(INSTR_RET);
-                add_val(uint64, num_variables);
+                add_val(uint64, num_variables + num_arguments);
                 break;
 
               case INSTR_EXIT:
+                token_next();
                 add_instruction(INSTR_EXIT);
                 break;
 
@@ -554,12 +570,13 @@ static void assemble() {
           }
 
           case TOKEN_RBRACE:
+            token_next();
             if (is_main) {
               add_instruction(INSTR_EXIT);
             }
             else {
               add_instruction(INSTR_RET);
-              add_val(uint64, num_variables);
+              add_val(uint64, num_variables + num_arguments);
               printf("adding return instruction %i\n", num_variables);
             }
             goto fn_done;
